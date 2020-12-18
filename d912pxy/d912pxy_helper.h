@@ -2,7 +2,7 @@
 MIT License
 
 Copyright(c) 2018 Jeremiah van Oosten
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -34,11 +34,16 @@ SOFTWARE.
 
 using namespace Microsoft::WRL;
 
+typedef struct fv4Color {
+	float val[4];
+} fv4Color;
+
 namespace d912pxy_helper {
 
 	LONG NTAPI VexHandler(PEXCEPTION_POINTERS ExceptionInfo);
 	LONG NTAPI VexDbgHandler(PEXCEPTION_POINTERS ExceptionInfo);
 
+	void InitLogModule();
 	void InstallVehHandler();
 
 	int IsFileExist(const char *name);
@@ -52,10 +57,12 @@ namespace d912pxy_helper {
 	DXGI_FORMAT DXGIFormatFromDX9FMT(D3DFORMAT fmt);
 	UINT8 BitsPerPixel(DXGI_FORMAT fmt);
 
+	BOOL GetTrueWindowsVersion(OSVERSIONINFOEX* pOSversion);
 	char* GetCPUBrandString();
 
 	char* StrGetCurrentLineStart(char* buffer);
 	char* StrNextLine(char* buffer);
+	bool StrCutLastElementInPath(char* fn);
 
 	UINT64 GetClosestPow2(UINT64 size);
 
@@ -64,4 +71,10 @@ namespace d912pxy_helper {
 	d912pxy_file_path* GetFilePath(d912pxy_file_path_id fpId);	
 
 	void SwitchFilePaths(d912pxy_file_path* newFpArray);
+
+	bool IsKeyDown(int vkcode);
+
+	INT64 SafeDiv(INT64 a, INT64 b);
+
+	wchar_t* strdupw(const wchar_t* s);
 }

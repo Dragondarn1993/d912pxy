@@ -2,7 +2,7 @@
 MIT License
 
 Copyright(c) 2018 Jeremiah van Oosten
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -125,12 +125,14 @@ LONG NTAPI d912pxy_helper::VexDbgHandler(PEXCEPTION_POINTERS ExceptionInfo)
 	}	
 }
 
+void d912pxy_helper::InitLogModule()
+{
+	d912pxy_s.log.text.RegisterModule(L"helper", &LGC_DEFAULT);
+}
+
 void d912pxy_helper::InstallVehHandler()
 {
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_ENABLE_VEH))
-		AddVectoredExceptionHandler(TRUE, VexDbgHandler);
-
-	d912pxy_s.log.text.RegisterModule(L"helper", &LGC_DEFAULT);
+	AddVectoredExceptionHandler(TRUE, VexDbgHandler);	
 }
 
 int d912pxy_helper::IsFileExist(const char *name)
@@ -183,21 +185,18 @@ typedef GUID DXGI_DEBUG_ID;
 void d912pxy_helper::d3d12_ReportLeaks()
 {
 #ifdef _DEBUG
-	ComPtr<IDXGIDebug> debugItf;
-
-	const GUID DXGI_DEBUG_ALL
-		= { 0xe48ae283,  0xda80, 0x490b, { 0x87, 0xe6, 0x43, 0xe9, 0xa9, 0xcf, 0xda, 0x8 } };
-
-	HMODULE hModule = NULL;
-	dxgi_dbg_get_proto pfn = NULL;
-
-	hModule = LoadLibraryA("Dxgidebug.dll");
+	static HMODULE hModule = LoadLibraryA("Dxgidebug.dll");
 	if (hModule)
 	{
-		pfn = (dxgi_dbg_get_proto)GetProcAddress(hModule, "DXGIGetDebugInterface");
+		const auto pfn = (dxgi_dbg_get_proto)GetProcAddress(hModule, "DXGIGetDebugInterface");
 		if (pfn)
 		{
+			ComPtr<IDXGIDebug> debugItf;
 			ThrowIfFailed(pfn(IID_PPV_ARGS(&debugItf)), "dxgi debug error 2");
+
+			const GUID DXGI_DEBUG_ALL
+				= { 0xe48ae283,  0xda80, 0x490b, { 0x87, 0xe6, 0x43, 0xe9, 0xa9, 0xcf, 0xda, 0x8 } };
+
 			debugItf->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
 		}
 	}
@@ -262,6 +261,8 @@ DXGI_FORMAT d912pxy_helper::DXGIFormatFromDX9FMT(D3DFORMAT fmt)
 		case D3DFMT_INTZ: return DXGI_FORMAT_R32_TYPELESS; break;//FOURCC INTZ
 		case 0x32495441: return DXGI_FORMAT_BC5_UNORM; break;//ATI2
 		case D3DFMT_A32B32G32R32F: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+		case D3DFMT_X8L8V8U8: return DXGI_FORMAT_B8G8R8X8_UNORM;
+		
 		case D3DFMT_NULL: return DXGI_FORMAT_UNKNOWN; break;//megai2: ignore it
 		default: 
 		{
@@ -430,6 +431,38 @@ UINT8 d912pxy_helper::BitsPerPixel(DXGI_FORMAT fmt)
 
 static char CPUBrandString[0x40] = { 0 };
 
+
+//megai2: some stackoverflow.com code. Thanks to Peter Thaus.
+BOOL d912pxy_helper::GetTrueWindowsVersion(OSVERSIONINFOEX* pOSversion)
+{
+	// Function pointer to driver function
+	DWORD (WINAPI *pRtlGetVersion)(
+		PRTL_OSVERSIONINFOW lpVersionInformation) = NULL;
+
+	// load/get the System-DLL
+	HINSTANCE hNTdllDll = LoadLibrary(L"ntdll.dll");
+
+	BOOL ret;
+
+	// successfully loaded?
+	if (hNTdllDll != NULL)
+	{
+		// get the function pointer to RtlGetVersion
+		pRtlGetVersion = (DWORD (WINAPI *)(PRTL_OSVERSIONINFOW))
+			GetProcAddress(hNTdllDll, "RtlGetVersion");
+
+		// if successfull then read the function
+		if (pRtlGetVersion != NULL)
+			ret = (pRtlGetVersion((PRTL_OSVERSIONINFOW)pOSversion) & 0x3) == 0;
+	} 
+
+	// if function failed, get out of here
+	if (pRtlGetVersion == NULL)
+		ret = FALSE;
+	
+	return ret;
+} 
+
 char * d912pxy_helper::GetCPUBrandString()
 {
 	if (CPUBrandString[0] != 0)
@@ -479,6 +512,26 @@ char * d912pxy_helper::StrNextLine(char * buffer)
 	return itr + 1;
 }
 
+bool d912pxy_helper::StrCutLastElementInPath(char* fn)
+{
+	char* lastDlmt = nullptr;
+	while (*fn != 0)
+	{
+		if ((*fn == '\\') && (*(fn + 1) != 0))
+			lastDlmt = fn;
+		++fn;
+	}
+
+	if (lastDlmt)
+	{
+		++lastDlmt;
+		*lastDlmt = 0;
+		return true;
+	} 
+
+	return false;
+}
+
 UINT64 d912pxy_helper::GetClosestPow2(UINT64 size)
 {
 	UINT64 pow2 = 1;
@@ -518,4 +571,27 @@ d912pxy_file_path * d912pxy_helper::GetFilePath(d912pxy_file_path_id fpId)
 void d912pxy_helper::SwitchFilePaths(d912pxy_file_path * newFpArray)
 {
 	currentFilePath = newFpArray;
+}
+
+bool d912pxy_helper::IsKeyDown(int vkcode)
+{
+	return (GetKeyState(vkcode) & 0x8000) != 0;
+}
+
+INT64 d912pxy_helper::SafeDiv(INT64 a, INT64 b)
+{
+	if (b)
+		return a / b;
+	else
+		return 0;
+}
+
+wchar_t* d912pxy_helper::strdupw(const wchar_t* s)
+{
+	//TODO: u=ugly, clean this up
+	wchar_t* ret = nullptr;
+	int l = lstrlenW(s)+1;
+	d912pxy_mem_block::allocZero(&ret, l);
+	memcpy(ret, s, l * sizeof(wchar_t));
+	return ret;
 }

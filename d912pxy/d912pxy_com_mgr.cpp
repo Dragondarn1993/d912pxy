@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2019 megai2
+Copyright(c) 2019-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -54,7 +54,7 @@ void d912pxy_com_mgr::Init()
 		sizeof(d912pxy_swapchain) + addedSize,
 		sizeof(d912pxy_surface_layer) + addedSize,
 		sizeof(d912pxy_sblock) + addedSize,
-		sizeof(d912pxy_pso_cache_item) + addedSize
+		sizeof(d912pxy_pso_item) + addedSize
 	};
 
 	table.Init(va_objSizes, PXY_INNER_COM_MGR_VA_MASK_BITS, PXY_COM_OBJ_COUNT);
@@ -76,6 +76,8 @@ void d912pxy_com_mgr::DeAllocateComObj(d912pxy_com_object * obj)
 	table.DeAllocateObj(obj);
 }
 
+#if _WIN64
+
 d912pxy_com_object * d912pxy_com_mgr::GetComObject(d912pxy_com_obj_typeid type, d912pxy_mem_va_table_obj_id id)
 {
 	return (d912pxy_com_object*)table.GetObj(type, id);
@@ -90,3 +92,5 @@ d912pxy_com_obj_typeid d912pxy_com_mgr::GetTypeIdFromAdr(d912pxy_com_object * ob
 {
 	return (d912pxy_com_obj_typeid)table.TypeFromAdr(obj);
 }
+
+#endif

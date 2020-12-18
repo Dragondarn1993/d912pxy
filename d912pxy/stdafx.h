@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -24,9 +24,14 @@ SOFTWARE.
 */
 #pragma once
 
+#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
+#endif
 
 #include "build_version.h"
+
+#include <atomic>
+#include <vector>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -35,6 +40,7 @@ SOFTWARE.
 #include <d3d9.h>
 #include <map>
 #include <unordered_map>
+#include <algorithm>
 
 // DirectX 12 specific headers.
 #include <d3d12.h>
@@ -56,6 +62,22 @@ SOFTWARE.
 	#include "../thirdparty/p7logger/Headers/P7_Telemetry.h"
 #endif
 
+#include "v3/base_object.h"
+#include "v3/util/log/error_handler.h"
+#include "v3/util/memory_block.h"
+#include "v3/util/hash.h"
+#include "v3/util/trivial/linear_array.h"
+#include "v3/util/trivial/push_buffer.h"
+#include "v3/util/mt/lock.h"
+#include "v3/util/mt/container.h"
+#include "v3/util/memtree.h"
+#include "v3/util/dir_reader.h"
+#include "v3/util/key_value_reader.h"
+
+#include "../thirdparty/imgui/imgui.h"
+#include "../thirdparty/imgui/imgui_impl_dx12.h"
+#include "../thirdparty/imgui/imgui_impl_win32.h"
+#include "../thirdparty/nv_api/nv_api_oc.h"
 #include "dbg_imagewriter.h"
 #include "stb_image.h"
 #include "../thirdparty/fastlz/fastlz.h"
@@ -70,17 +92,19 @@ SOFTWARE.
 #include "d912pxy_helper.h"
 #include "d912pxy_noncom.h"
 #include "d912pxy_dynamic_imports.h"
+#include "d912pxy_mem_block.h"
 #include "d912pxy_mem_mgr.h"
 #include "d912pxy_mem_va_table.h"
 #include "d912pxy_com_mgr.h"
 #include "d912pxy_config.h"
 #include "d912pxy_metrics.h"
 #include "d912pxy_ringbuffer.h"
+#include "d912pxy_swap_list.h"
 #include "d912pxy_comhandler.h"
 #include "d912pxy_linked_list.h"
 #include "d912pxy_cleanup_thread.h"
-#include "d912pxy_memtree.h"
-#include "d912pxy_memtree2.h"
+#include "d912pxy_vfs_pck.h"
+#include "d912pxy_vfs_entry.h"
 #include "d912pxy_vfs.h"
 #include "d912pxy_vfs_packer.h"
 #include "d912pxy_swapchain.h"
@@ -99,8 +123,12 @@ SOFTWARE.
 #include "d912pxy_surface_pool.h"
 #include "d912pxy_sblock.h"
 #include "d912pxy_vdecl.h"
-#include "d912pxy_hlsl_generator.h"
+#include "d912pxy_d3dx9.h"
+#include "d912pxy_dxbc9.h"
+#include "d912pxy_hlsl_gen.h"
 #include "d912pxy_shader_replacer.h"
+#include "d912pxy_trimmed_pso.h"
+#include "d912pxy_pso_item.h"
 #include "d912pxy_shader.h"
 #include "d912pxy_shader_db.h"
 #include "d912pxy_shader_pair.h"
@@ -112,18 +140,30 @@ SOFTWARE.
 #include "d912pxy_gpu_cmd_list.h"
 #include "d912pxy_gpu_que.h"
 #include "d912pxy_texture_state.h"
-#include "d912pxy_pso_cache.h"
+#include "d912pxy_pso_mt_dispatcher.h"
+#include "d912pxy_pso_db.h"
+#include "d912pxy_dx9_pipeline_state.h"
+#include "d912pxy_folded_buffer.h"
 #include "d912pxy_batch.h"
 #include "d912pxy_iframe.h"
 #include "d912pxy_async_upload_thread.h"
 #include "d912pxy_texture_loader.h"
 #include "d912pxy_buffer_loader.h"
-#include "d912pxy_replay_base.h"
+#include "d912pxy_replay_item.h"
+#include "d912pxy_replay_buffer.h"
 #include "d912pxy_replay_thread.h"
 #include "d912pxy_replay.h"
-#include "d912pxy_replay_passthru.h"
 #include "d912pxy_draw_up.h"
-#include "d912pxy_surface_clear.h"
+#include "d912pxy_surface_ops.h"
+#include "v3/dx12/extras/shader_pair/info.h"
+#include "v3/dx12/extras/shader_pair/tracker.h"
+#include "v3/dx12/extras/iframe_mods/manager.h"
+#include "v3/dx12/extras/iframe_mods/state_holder.h"
+#include "v3/dx12/extras/iframe_mods/pass_detector.h"
+#include "v3/dx12/extras/iframe_mods/native_draw.h"
+#include "v3/dx12/extras/iframe_mods/generic_taa.h"
+#include "v3/dx12/extras/iframe_mods/gw2_taa.h"
+#include "d912pxy_extras.h"
 #include "d912pxy_device.h"
 #include "d912pxy_instance.h"
 #include "d912pxy_com_object.h"

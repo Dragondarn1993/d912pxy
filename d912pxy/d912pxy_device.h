@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -28,17 +28,17 @@ SOFTWARE.
 #include <chrono>
 
 static const D3D12_DESCRIPTOR_HEAP_DESC d912pxy_dx12_heap_config[PXY_INNER_MAX_DSC_HEAPS] = {
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1024, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1024, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, PXY_INNER_MAX_IFRAME_BATCH_COUNT * 10 + 1024, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 64, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 }
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV,			1024,	D3D12_DESCRIPTOR_HEAP_FLAG_NONE,			0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_DSV,			1024,	D3D12_DESCRIPTOR_HEAP_FLAG_NONE,			0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,	82944,	D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,	0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,		64,		D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,	0 }
 };
 
 static const D3D12_DESCRIPTOR_HEAP_DESC d912pxy_dx12_heap_config_compat[PXY_INNER_MAX_DSC_HEAPS] = {
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 512, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 64, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, PXY_INNER_MAX_IFRAME_BATCH_COUNT * 10 + 1024, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 },
-	{ D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 64, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 }
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_RTV,			512,	D3D12_DESCRIPTOR_HEAP_FLAG_NONE,			0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_DSV,			64,		D3D12_DESCRIPTOR_HEAP_FLAG_NONE,			0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,	82944,	D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,  0 },
+	{ D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,		64,		D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,  0 }
 };
 
 
@@ -51,6 +51,7 @@ public:
 	~d912pxy_device(void);
 
 	void Init(IDirect3DDevice9* dev, void* par);
+	void UnInit();
 
 //com methods
 	D912PXY_METHOD_(ULONG, ReleaseDevice)(PXY_THIS);
@@ -298,19 +299,16 @@ public:
 
 	void IFrameCleanupEnqeue(d912pxy_comhandler* obj);
 
-	UINT InterruptThreads() { return InterlockedAdd(&threadInterruptState, 0); };
+	UINT InterruptThreads() { return threadInterruptState; };
 	void LockThread(UINT thread);
 	void InitLockThread(UINT thread);
 
 	void LockAsyncThreads();
 	void UnLockAsyncThreads();
 
-	void TrackShaderCodeBugs(UINT type, UINT val, d912pxy_shader_uid faultyId);
-
 	void CopyOriginalDX9Data(IDirect3DDevice9* dev, D3DDEVICE_CREATION_PARAMETERS* origPars, D3DPRESENT_PARAMETERS* origPP);
 	void InitVFS();
-	void InitVFSitem(d912pxy_vfs_id_name* id, UINT64 memCache);
-
+	
 	void InitClassFields();
 	void InitThreadSyncObjects();
 	void InitSingletons();
@@ -322,6 +320,9 @@ public:
 	void PrintInfoBanner();
 	void InitDefaultSwapChain(D3DPRESENT_PARAMETERS* pPresentationParameters);
 
+	void NvGPU_force_highpower();
+	void NvGPU_restore();
+
 	ComPtr<ID3D12Device> SelectSuitableGPU();
 	void SetupDevice(ComPtr<ID3D12Device> device);
 
@@ -332,16 +333,20 @@ public:
 	char* GetCurrentGPUName();
 
 	void ExternalFlush();
+	
+	d912pxy_swapchain* GetPrimarySwapChain();
+
+	uint32_t getCPUCoreCount() { return cpuCoreCount; }
 
 	//megai2: variants of API calls
 
-	HRESULT DrawIndexedPrimitive_PS(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
+	HRESULT DrawPrimitive_Compat(D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
 	HRESULT DrawIndexedPrimitive_Compat(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
 	D912PXY_METHOD_NC(DrawPrimitiveUP_StateUnsafe)(THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 	D912PXY_METHOD_NC(DrawIndexedPrimitiveUP_StateUnsafe)(THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
-	HRESULT SetTexture_PS(DWORD Stage, IDirect3DBaseTexture9* pTexture);
 	HRESULT Present_PG(CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);
+	HRESULT Present_Extra(CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);
 	HRESULT Clear_Emulated(DWORD Count, CONST D3DRECT* pRects, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil);
 		//CAR = cpu api reduction
 	HRESULT SetStreamSource_CAR(UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride);
@@ -354,12 +359,11 @@ public:
 	D912PXY_METHOD_NC(CreateQuery_Optimized)(THIS_ D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery);
 
 	//com routes for them
-	D912PXY_METHOD(DrawIndexedPrimitive_PS)(PXY_THIS_ D3DPRIMITIVETYPE, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
 	D912PXY_METHOD(DrawIndexedPrimitive_Compat)(PXY_THIS_ D3DPRIMITIVETYPE, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
 	D912PXY_METHOD(DrawPrimitiveUP_StateUnsafe)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 	D912PXY_METHOD(DrawIndexedPrimitiveUP_StateUnsafe)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
-	D912PXY_METHOD(SetTexture_PS)(PXY_THIS_ DWORD Stage, IDirect3DBaseTexture9* pTexture);
-	D912PXY_METHOD(Present_PG)(PXY_THIS_ CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);
+	D912PXY_METHOD(Present_PG)(PXY_THIS_ CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);	
+	D912PXY_METHOD(Present_Extra)(PXY_THIS_ CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion);
 	D912PXY_METHOD(Clear_Emulated)(PXY_THIS_ DWORD Count, CONST D3DRECT* pRects, DWORD Flags, D3DCOLOR Color, float Z, DWORD Stencil);
 	D912PXY_METHOD(SetStreamSource_CAR)(PXY_THIS_ UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride);
 	D912PXY_METHOD(SetIndices_CAR)(PXY_THIS_ IDirect3DIndexBuffer9* pIndexData);
@@ -369,14 +373,13 @@ public:
 	D912PXY_METHOD(SetRenderState_Tracked)(PXY_THIS_ D3DRENDERSTATETYPE State, DWORD Value);
 	D912PXY_METHOD(SetSamplerState_Tracked)(PXY_THIS_ DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value);
 	D912PXY_METHOD(CreateQuery_Optimized)(PXY_THIS_ D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery);
+	D912PXY_METHOD(DrawPrimitive_Compat)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount);
 	
-	
-
 	HRESULT InnerPresentExecute();
 	void InnerPresentFinish();
 
 private:
-	LONG threadInterruptState;	
+	std::atomic<LONG> threadInterruptState { 0 };
 	d912pxy_thread_lock threadLockdEvents[PXY_INNER_THREADID_MAX];
 	d912pxy_thread_lock threadLock;
 	d912pxy_thread_lock cleanupLock;	
@@ -388,7 +391,7 @@ private:
 	ID3D12Device* m_d12evice_ptr;
 	
 	
-	d912pxy_surface_clear* m_clearEmul;
+	d912pxy_surface_ops* m_emulatedSurfaceOps;
 
 	d912pxy_dheap* m_dheaps[PXY_INNER_MAX_DSC_HEAPS];
 	
@@ -409,11 +412,18 @@ private:
 	void* initPtr;
 
 	char GPUNameA[128];
+	uint32_t cpuCoreCount=1;
 
 	//dx9 api hacks
 	UINT32 gpuWriteDsc;
 
 	d912pxy_performance_graph* perfGraph;
-	D3DFORMAT stageFormatsTrack[1024];
+
+	//nvapi 
+	nvapi_fptrs* nvapi;
+
+	UINT nvapi_dynPstateChanged;
+
+	UINT convertTexStage(UINT stage) { return (stage & 0xF) + 16 * ((stage >> 4) != 0); }
 };
 

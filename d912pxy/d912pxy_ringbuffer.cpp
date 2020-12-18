@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -75,8 +75,6 @@ void d912pxy_ringbuffer<ElementType>::WriteElement(ElementType ele)
 			//it's not end yet, cuz we allocating memory to point of overruning so we must copy memory to be readed into end of new memory block
 			memcpy((void*)(readPoint + addMemSize), (void*)(readPoint), oldMemSize - (readPoint - bufferData));
 
-
-
 			readPoint += addMemSize;
 			maxElements += expandElements;
 
@@ -94,7 +92,7 @@ void d912pxy_ringbuffer<ElementType>::WriteElement(ElementType ele)
 	if (writePoint == bufferEnd)
 		writePoint = bufferData;
 
-	InterlockedAdd(&writed,1);
+	++writed;
 }
 
 template<class ElementType>
@@ -163,7 +161,7 @@ void d912pxy_ringbuffer<ElementType>::Next()
 	if (!writed)
 		return;
 
-	InterlockedDecrement(&writed);
+	--writed;
 
 	readPoint += sizeof(ElementType);
 
@@ -184,6 +182,31 @@ ElementType d912pxy_ringbuffer<ElementType>::PopElementMTG()
 	return ret;	
 }
 
+template<class ElementType>
+void * d912pxy_ringbuffer<ElementType>::GetBufferBase()
+{
+	return (void*)bufferData;
+}
+
+template<class ElementType>
+ElementType d912pxy_ringbuffer<ElementType>::GetElementOffset(UINT index)
+{
+	return *GetElementOffsetPtr(index);
+}
+
+template<class ElementType>
+ElementType* d912pxy_ringbuffer<ElementType>::GetElementOffsetPtr(UINT index)
+{
+	intptr_t bufOffsetPtr = readPoint + index * sizeof(ElementType);
+
+	if (bufOffsetPtr >= bufferEnd)
+	{
+		bufOffsetPtr = (bufOffsetPtr - bufferEnd) % (maxElements * sizeof(ElementType)) + bufferData;
+	}
+
+	return ((ElementType*)bufOffsetPtr);
+}
+
 template class d912pxy_ringbuffer<d912pxy_comhandler*>;
 template class d912pxy_ringbuffer<d912pxy_gpu_cmd_list*>;
 template class d912pxy_ringbuffer<d912pxy_batch*>;
@@ -199,4 +222,8 @@ template class d912pxy_ringbuffer<UINT64>;
 template class d912pxy_ringbuffer<d912pxy_linked_list_element*>;
 template class d912pxy_ringbuffer<d912pxy_vstream_lock_data>;
 template class d912pxy_ringbuffer<void*>;
-template class d912pxy_ringbuffer<d912pxy_replay_gpu_write_control*>;
+template class d912pxy_ringbuffer<d912pxy_vfs_pck_chunk*>;
+template class d912pxy_ringbuffer<float>;
+template class d912pxy_ringbuffer<d912pxy_pso_item*>;
+template class d912pxy_ringbuffer<d912pxy_pso_item**>;
+template class d912pxy_ringbuffer<d912pxy_trimmed_pso_desc>;

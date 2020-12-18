@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -38,6 +38,15 @@ LRESULT APIENTRY d912pxy_dxgi_wndproc_patch(
 	return baseSwapChain->DXGIWndProc(hwnd, uMsg, wParam, lParam);
 }
 
+LRESULT APIENTRY d912pxy_dxgi_wndproc_patch_extras(
+	HWND hwnd,
+	UINT uMsg,
+	WPARAM wParam,
+	LPARAM lParam)
+{
+	return baseSwapChain->DXGIWndProc_Extras(hwnd, uMsg, wParam, lParam);
+}
+
 d912pxy_swapchain::d912pxy_swapchain(int index, D3DPRESENT_PARAMETERS * in_pp) : d912pxy_comhandler(PXY_COM_OBJ_SWAPCHAIN, L"swap chain")
 {
 	if (!FAILED(d912pxy_s.dx12.que.GetDXQue().As(&w7_cq)))
@@ -53,7 +62,7 @@ d912pxy_swapchain::d912pxy_swapchain(int index, D3DPRESENT_PARAMETERS * in_pp) :
 	dxgiNoWaitFlag = DXGI_PRESENT_DO_NOT_WAIT;
 	dxgiOWndProc = NULL;	
 	errorCount = 0;
-
+	dxgiMaxFrameLatency = d912pxy_s.config.GetValueUI32(PXY_CFG_DX_FRAME_LATENCY);
 
 	if (index == 0)
 	{
@@ -131,7 +140,7 @@ HRESULT d912pxy_swapchain::GetFrontBufferData(IDirect3DSurface9 * pDestSurface)
 
 	d912pxy_surface * dst = d912pxy_surface::CorrectLayerRepresent(PXY_COM_CAST(d912pxy_com_object, pDestSurface));
 
-	d912pxy_s.render.replay.StretchRect(backBufferSurface, dst);
+	d912pxy_s.render.replay.DoStretchRect(backBufferSurface, dst);
 
 	dst->CopySurfaceDataToCPU();
 
@@ -200,7 +209,9 @@ void d912pxy_swapchain::StartFrame()
 	backBufferSurface->BTransitGID(D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_RENDER_TARGET, CLG_TOP);
 
 	d912pxy_s.dev.SetRenderTarget(0, PXY_COM_CAST_(IDirect3DSurface9, backBufferSurface));
-	d912pxy_s.dev.SetDepthStencilSurface(PXY_COM_CAST_(IDirect3DSurface9, depthStencilSurface));
+
+	if (depthStencilSurface)
+		d912pxy_s.dev.SetDepthStencilSurface(PXY_COM_CAST_(IDirect3DSurface9, depthStencilSurface));
 }
 
 void d912pxy_swapchain::EndFrame()
@@ -227,6 +238,12 @@ HRESULT d912pxy_swapchain::Swap()
 HRESULT d912pxy_swapchain::SwapCheck()
 {
 	return swapCheckValue;
+}
+
+void d912pxy_swapchain::WaitForNewFrame()
+{
+	if (dxgiMaxFrameLatency)	
+		WaitForSingleObjectEx(dxgiFrameLatencyWaitObj, 1000, true);
 }
 
 void d912pxy_swapchain::CopyFrameToDXGI(ID3D12GraphicsCommandList * cl)
@@ -358,8 +375,7 @@ void d912pxy_swapchain::GetGammaRamp(D3DGAMMARAMP* pRamp)
 
 LRESULT d912pxy_swapchain::DXGIWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	//megai2: this procedure is called out of context, beware various conditions!
-
+	//megai2: this procedure is called out of context, beware various conditions!	
 	LOG_DBG_DTDM2("DXGI_WP MSG = %04X", uMsg);
 
 	switch (uMsg)
@@ -380,10 +396,28 @@ LRESULT d912pxy_swapchain::DXGIWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPAR
 	return ret;
 }
 
+LRESULT d912pxy_swapchain::DXGIWndProc_Extras(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (d912pxy_s.extras.WndProc(hwnd, uMsg, wParam, lParam))
+		return true;
+
+	return DXGIWndProc(hwnd, uMsg, wParam, lParam);
+}
+
 void d912pxy_swapchain::ReanimateDXGI()
 {		
 	fullscreenIterrupt.SetValue(1);
 	fullscreenIterrupt.ResetLock();
+}
+
+HWND d912pxy_swapchain::GetTargetWindow()
+{
+	return currentPP.hDeviceWindow;
+}
+
+d912pxy_surface * d912pxy_swapchain::GetRenderBuffer()
+{
+	return backBufferSurface;
 }
 
 void d912pxy_swapchain::ChangeState(d912pxy_swapchain_state newState)
@@ -403,6 +437,16 @@ void d912pxy_swapchain::ThrowCritialError(HRESULT ret, const char * msg)
 
 void d912pxy_swapchain::ResetFrameTargets()
 {	
+	//force gc cleanup if we change bb resolution to prevent trashing rt dheap
+	if ((oldPP.BackBufferWidth != currentPP.BackBufferWidth) || (oldPP.BackBufferHeight != currentPP.BackBufferHeight))
+	{
+		d912pxy_s.thread.cleanup.ForceCleanup();
+		//cleanup dheap slots fully too
+		d912pxy_s.dev.GetDHeap(PXY_INNER_HEAP_DSV)->CleanupSlots(-1);
+		d912pxy_s.dev.GetDHeap(PXY_INNER_HEAP_RTV)->CleanupSlots(-1);
+		d912pxy_s.dev.GetDHeap(PXY_INNER_HEAP_SRV)->CleanupSlots(-1);
+	}
+
 	FixPresentParameters();
 
 	FreeFrameTargets();	
@@ -658,6 +702,8 @@ HRESULT d912pxy_swapchain::SwapHandle_Swap_Test()
 
 HRESULT d912pxy_swapchain::SwapHandle_Setup_W7()
 {
+	OverrideWndProc();
+
 	for (int i = 0; i != 2; ++i)
 	{
 		LOG_ERR_THROW2(d912pxy_s.dx12.dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&w7_cla[i])), "w7 gpu cmd list allocator error");
@@ -727,6 +773,11 @@ HRESULT d912pxy_swapchain::InitDXGISwapChain()
 	dxgiResizeFlags = 0;	
 	dxgiPresentFlags = dxgiNoWaitFlag;
 	
+	if (dxgiMaxFrameLatency)
+	{
+		dxgiResizeFlags |= DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+	}
+	
 	if (currentPP.Windowed)
 	{
 		dxgiResizeFlags |= dxgiTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
@@ -763,10 +814,7 @@ HRESULT d912pxy_swapchain::InitDXGISwapChain()
 		currentPP.BackBufferFormat
 	);
 
-	if (!dxgiOWndProc)
-	{
-		dxgiOWndProc = (WNDPROC)SetWindowLongPtr(currentPP.hDeviceWindow, GWLP_WNDPROC, (LONG_PTR)&d912pxy_dxgi_wndproc_patch);
-	}
+	OverrideWndProc();
 	
 	HRESULT swapRet = dxgiFactory4->CreateSwapChainForHwnd(
 		d912pxy_s.dx12.que.GetDXQue().Get(),
@@ -785,6 +833,18 @@ HRESULT d912pxy_swapchain::InitDXGISwapChain()
 		// Disable the Alt+Enter fullscreen toggle feature. Switching to fullscreen will be handled manually.
 		ThrowCritialError(dxgiFactory4->MakeWindowAssociation(currentPP.hDeviceWindow, DXGI_MWA_NO_ALT_ENTER), "DXGI window assoc @ InitDXGISwapChain");
 		ThrowCritialError(swapChain1.As(&dxgiSwapchain), "DXGI swap chain 1->4 @ InitDXGISwapChain");
+
+		if (dxgiMaxFrameLatency)
+		{
+			ThrowCritialError(dxgiSwapchain->SetMaximumFrameLatency(dxgiMaxFrameLatency), "Failed to set DXGI max frame latency");
+			dxgiFrameLatencyWaitObj = dxgiSwapchain->GetFrameLatencyWaitableObject();
+
+			if (dxgiFrameLatencyWaitObj == INVALID_HANDLE_VALUE)
+				ThrowCritialError(-1, "Failed to get DXGI frame latency waitable obj");
+
+			WaitForNewFrame();
+		}		
+
 		return swapRet;
 	}	
 }
@@ -921,5 +981,16 @@ void d912pxy_swapchain::CacheDXGITearingSupport()
 				dxgiTearingSupported = FALSE;
 			}
 		}
+	}
+}
+
+void d912pxy_swapchain::OverrideWndProc()
+{
+	if (!dxgiOWndProc)
+	{
+		if (d912pxy_s.config.GetValueUI32(PXY_CFG_EXTRAS_ENABLE))
+			dxgiOWndProc = (WNDPROC)SetWindowLongPtr(currentPP.hDeviceWindow, GWLP_WNDPROC, (LONG_PTR)&d912pxy_dxgi_wndproc_patch_extras);
+		else
+			dxgiOWndProc = (WNDPROC)SetWindowLongPtr(currentPP.hDeviceWindow, GWLP_WNDPROC, (LONG_PTR)&d912pxy_dxgi_wndproc_patch);
 	}
 }

@@ -92,6 +92,16 @@ D3D12_SHADER_BYTECODE * d912pxy_shader::GetCode()
 	return (D3D12_SHADER_BYTECODE*)&bytecode;
 }
 
+d912pxy_mem_block d912pxy_shader::GetHLSLSource()
+{
+	if (oCode)
+		return d912pxy_shader_replacer(oCode, oLen, mUID, shaderType).GetHLSL();
+	else
+		LOG_ERR_DTDM("No original DXBC present to generate HLSL for %016llX", mUID);
+
+	return d912pxy_mem_block::null();
+}
+
 d912pxy_shader_uid d912pxy_shader::GetID()
 {
 	return mUID;

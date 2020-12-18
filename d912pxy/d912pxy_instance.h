@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -27,11 +27,8 @@ SOFTWARE.
 IDirect3DDevice9* app_cb_D3D9Dev_create(IDirect3DDevice9Proxy* dev, IDirect3D9* obj);
 
 typedef struct d912pxy_instance {
-	d912pxy_instance() { running = 0; };
-
-	//megai2: yes this is not nice. 
-	//if you have better idea, show it!
-	~d912pxy_instance() { exit(0); };
+	d912pxy_instance() : dynamicFilePaths(nullptr), running(0) {};
+	~d912pxy_instance() {  };
 
 	struct pool {
 		d912pxy_vstream_pool vstream;
@@ -55,20 +52,20 @@ typedef struct d912pxy_instance {
 	struct render {
 
 		d912pxy_iframe iframe;
-		d912pxy_texture_state tex;
-		d912pxy_batch batch;
 
+		struct state {
+			d912pxy_texture_state tex;
+			d912pxy_dx9_pipeline_state pso;
+		} state;
+
+		d912pxy_batch_buffer batch;
 		d912pxy_draw_up draw_up;
-
-#ifdef USE_PASSTHRU_REPLAY
-		d912pxy_replay_passthru replay;
-#else
 		d912pxy_replay replay;
-#endif
 
 		struct db {
-			d912pxy_pso_cache pso;
+			d912pxy_pso_db pso;
 			d912pxy_shader_db shader;
+			d912pxy_pso_mt_dispatcher psoMTCompiler;
 		} db;
 	} render;
 
@@ -84,12 +81,18 @@ typedef struct d912pxy_instance {
 	};
 	
 	d912pxy_vfs vfs;		
-	d912pxy_config config;	
+	d912pxy_config config;
+	d912pxy_file_path* dynamicFilePaths;
 
 	d912pxy_com_mgr com;
 	d912pxy_mem_mgr mem;
 
 	d912pxy_dynamic_imports imports;
+
+	d912pxy_extras extras;
+	//TODO: maybe move it to another category
+	d912pxy::extras::ShaderPair::InfoStorage spairInfo;
+	d912pxy::extras::IFrameMods::Manager iframeMods;
 
 	UINT running;
 } d912pxy_instance;

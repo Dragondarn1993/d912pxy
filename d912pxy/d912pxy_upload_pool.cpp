@@ -32,6 +32,24 @@ d912pxy_upload_pool::d912pxy_upload_pool() : d912pxy_pool_memcat<d912pxy_upload_
 
 d912pxy_upload_pool::~d912pxy_upload_pool()
 {
+
+}
+
+void d912pxy_upload_pool::Init()
+{
+	memPoolSize = d912pxy_s.config.GetValueUI64(PXY_CFG_POOLING_UPLOAD_ALLOC_STEP);
+	memPoolHeapType = D3D12_HEAP_TYPE_UPLOAD;
+	memPoolHeapFlags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+
+	d912pxy_pool_memcat<d912pxy_upload_item*, d912pxy_upload_pool*>::Init(		
+		PXY_INNDER_UPLOAD_POOL_BITIGNORE,
+		PXY_INNDER_UPLOAD_POOL_BITLIMIT,
+		PXY_CFG_POOLING_UPLOAD_LIMITS	
+	);
+}
+
+void d912pxy_upload_pool::UnInit()
+{
 	pRunning = 0;
 
 	for (int i = 0; i != PXY_INNDER_UPLOAD_POOL_BITCNT; ++i)
@@ -47,21 +65,10 @@ d912pxy_upload_pool::~d912pxy_upload_pool()
 
 		LOG_DBG_DTDM3("ul pool tbl[%u] = %u", i, tsz);
 
-		delete memTable[i];		
+		delete memTable[i];
 	}
-}
 
-void d912pxy_upload_pool::Init()
-{
-	memPoolSize = d912pxy_s.config.GetValueUI64(PXY_CFG_POOLING_UPLOAD_ALLOC_STEP);
-	memPoolHeapType = D3D12_HEAP_TYPE_UPLOAD;
-	memPoolHeapFlags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
-
-	d912pxy_pool_memcat<d912pxy_upload_item*, d912pxy_upload_pool*>::Init(		
-		PXY_INNDER_UPLOAD_POOL_BITIGNORE,
-		PXY_INNDER_UPLOAD_POOL_BITLIMIT,
-		PXY_CFG_POOLING_UPLOAD_LIMITS	
-	);
+	d912pxy_pool_memcat<d912pxy_upload_item*, d912pxy_upload_pool*>::UnInit();
 }
 
 d912pxy_upload_item * d912pxy_upload_pool::GetUploadObject(UINT size)
@@ -146,11 +153,12 @@ fallback:
 	return ret;
 }
 
-d912pxy_upload_item::d912pxy_upload_item(UINT8 icat) : d912pxy_comhandler(PXY_COM_OBJ_NOVTABLE, L"upload item")
+d912pxy_upload_item::d912pxy_upload_item(UINT8 icat) 
+	: d912pxy_comhandler(PXY_COM_OBJ_NOVTABLE, L"upload item")
+	, cat(icat)
+	, usedSpace(0)
 {
-	cat = icat;	
 	space = d912pxy_s.pool.upload.MemCatToSize(cat);
-	usedSpace = 0;
 	mRes = d912pxy_s.pool.upload.MakeUploadBuffer(cat);
 	LOG_ERR_THROW2(mRes->Map(0, 0, (void**)&mappedMemWofs), "upload pool memory map error on creation");
 }
@@ -206,7 +214,7 @@ void d912pxy_upload_item::Reconstruct(void* mem, UINT64 rowPitch, UINT64 height,
 		memcpy((void*)bufferRef, (void*)srcm, size);
 
 		bufferRef += rowPitch;
-		srcm = srcm + size;
+		srcm += size;
 	}
 }
 

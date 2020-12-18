@@ -47,6 +47,8 @@ public:
 	d912pxy_mem_mgr();
 	~d912pxy_mem_mgr();
 
+	void UnInit();
+
 	UINT64 GetPageSize();
 
 	void ReleaseReservedVARange(intptr_t base);
@@ -99,7 +101,7 @@ private:
 
 	d912pxy_StackWalker* stkWlk;
 
-	LONG64 memUsed;
+	std::atomic<LONG64> memUsed;
 	LONG64 memVAUsed;
 #endif
 };

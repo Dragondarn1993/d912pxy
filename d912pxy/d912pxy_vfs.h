@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -26,82 +26,133 @@ SOFTWARE.
 #include "stdafx.h"
 
 #define PXY_VFS_MAX_BID 256
-#define PXY_VFS_MAX_FILES_PER_BID 0x80000
-#define PXY_VFS_FILE_HEADER_SIZE 16
-#define PXY_VFS_BID_TABLE_SIZE (PXY_VFS_MAX_FILES_PER_BID * PXY_VFS_FILE_HEADER_SIZE)
-#define PXY_VFS_BID_TABLE_START 16
-#define PXY_VFS_DATA_OFFSET (PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START)
 
-#define PXY_VFS_BID_CSO 0
-#define PXY_VFS_BID_SHADER_PROFILE 1
-#define PXY_VFS_BID_PSO_CACHE_KEYS 2
-#define PXY_VFS_BID_PSO_PRECOMPILE_LIST 3
-#define PXY_VFS_BID_SHADER_SOURCES 4
-#define PXY_VFS_BID_DERIVED_CSO_VS 5
-#define PXY_VFS_BID_DERIVED_CSO_PS 6
-#define PXY_VFS_BID_END 7
+#define PXY_VFS_LATEST_PCK L"latest.pck"
 
-#define PXY_VFS_SIGNATURE 0x443931325043b46
-#define PXY_VFS_VER 1
+static const wchar_t* d912pxy_vfs_entry_name_str[] = {
+	L"Compiled shader cache",
+	L"Shader profiles",
+	L"PSO cache keys",
+	L"PSO precompile list",
+	L"Shader sources",
+	L"PSO derived VS code",
+	L"PSO derived PS code",
+	L"PSO derived alias refs",
+	L"VFS original paths"
+};
 
-#pragma pack(push, 1)
-typedef struct d912pxy_vfs_file_header {
-	UINT64 hash;
-	UINT64 offset;
-} d912pxy_vfs_file_header;
-#pragma pack(pop)
+enum class d912pxy_vfs_bid : UINT32 {
+	cso = 0,
+	shader_profile = 1,
+	pso_cache_keys = 2,
+	pso_precompile_list = 3,
+	shader_sources = 4,
+	derived_cso_vs = 5,
+	derived_cso_ps = 6,
+	derived_cso_refs = 7,
+	vfs_paths = 8,
+	end = 9
+};
 
-typedef struct d912pxy_vfs_id_name {
-	UINT num;
-	const char* name;
-} d912pxy_vfs_id_name;
+typedef UINT64 d912pxy_vfs_path_hash;
 
-typedef struct d912pxy_vfs_entry {
-	d912pxy_thread_lock lock;
-	FILE* m_vfsBlocks;
-	void* m_vfsCache;
-	UINT32 m_vfsCacheSize;
-	UINT32 m_vfsFileCount;
-	d912pxy_memtree2* m_vfsFileOffsets;
-	UINT64 m_vfsLastFileOffset;
-} d912pxy_vfs_entry;
+class d912pxy_vfs_path {
+public:
+	d912pxy_vfs_path(const char* fnpath, d912pxy_vfs_bid bid) :
+		i_bid(bid)
+	{
+		i_path = HashFromName(fnpath);
+	}
 
-class d912pxy_vfs
+	d912pxy_vfs_path(d912pxy_vfs_path_hash path, d912pxy_vfs_bid bid) :
+		i_bid(bid),
+		i_path(path)
+	{
+
+	}
+
+	~d912pxy_vfs_path()
+	{
+
+	}
+
+	d912pxy_vfs_bid bid() { return i_bid; };
+	UINT32 bidIndex() { return static_cast<UINT32>(i_bid); };
+	d912pxy_vfs_path_hash pathHash() { return i_path; }
+
+private:
+	d912pxy_vfs_path_hash HashFromName(const char* fnpath);
+
+	d912pxy_vfs_path_hash i_path;
+	d912pxy_vfs_bid i_bid;
+};
+
+class d912pxy_vfs_locked_entry 
 {
+public:
+	d912pxy_vfs_locked_entry(d912pxy_vfs_bid bid, d912pxy_vfs_entry** itemArray) :
+		i_bid(static_cast<UINT32>(bid))
+	{
+		i_item = itemArray[i_bid];
+		itemLocks[0/*i_bid*/].Hold();
+	}
+
+	~d912pxy_vfs_locked_entry()
+	{
+		itemLocks[0/*i_bid*/].Release();
+	}
+
+	d912pxy_vfs_entry* operator->() {
+		return i_item;
+	};
+
+private:
+	UINT32 i_bid;
+	d912pxy_vfs_entry* i_item;
+
+	static d912pxy_thread_lock itemLocks[PXY_VFS_MAX_BID];
+};
+
+class d912pxy_vfs : public d912pxy_noncom
+{
+	friend d912pxy_vfs_locked_entry;
 public:
 	d912pxy_vfs();
 	~d912pxy_vfs();
 
 	void Init(const char* lockPath);
+	void UnInit();
 
 	void SetRoot(wchar_t* rootPath);
-	void* LoadVFS(d912pxy_vfs_id_name* id, UINT memCache);
+	void LoadVFS();
 
-	UINT64 IsPresentN(const char* fnpath, UINT32 vfsId);
-	UINT64 IsPresentH(UINT64 fnHash, UINT32 vfsId);
-
-	void* LoadFileN(const char* fnpath, UINT* sz, UINT id);
-	void WriteFileN(const char* fnpath, void* data, UINT sz, UINT id);
-	void ReWriteFileN(const char* fnpath, void* data, UINT sz, UINT id);
-
-	void* LoadFileH(UINT64 namehash, UINT* sz, UINT id);
-	void WriteFileH(UINT64 namehash, void* data, UINT sz, UINT id);
-	void ReWriteFileH(UINT64 namehash, void* data, UINT sz, UINT id);
-
-	UINT64 HashFromName(const char* fnpath);
-
-	d912pxy_memtree2* GetHeadTree(UINT id);
-	void* GetCachePointer(UINT32 offset, UINT id);
+	bool IsFilePresent(d912pxy_vfs_path path);
+	bool ReadFile(d912pxy_vfs_path path, d912pxy_mem_block to);
+	d912pxy_mem_block ReadFile(d912pxy_vfs_path path);
+	void WriteFile(d912pxy_vfs_path path, d912pxy_mem_block data);		
 		
-	UINT32 IsWriteAllowed() { return writeAllowed; };
+	d912pxy_ringbuffer<d912pxy_vfs_path_hash>* GetFileList(d912pxy_vfs_bid bid);
+
+	UINT32 IsWriteAllowed() { return writeAllowed; };		
+	void SetWriteMask(UINT32 val);
+	void TakeOutWriteAccess();
+
+	d912pxy_vfs_locked_entry GetBidLocked(d912pxy_vfs_path path);
+	d912pxy_vfs_locked_entry GetBidLocked(d912pxy_vfs_bid bid);
+
+	d912pxy_vfs_pck_chunk* WriteFileToPck(d912pxy_vfs_pck_chunk* prevChunk, UINT id, UINT64 namehash, void* data, UINT sz);
 
 private:
 	HANDLE lockFile;
 	UINT32 writeAllowed;
 	char m_rootPath[2048];
+	
+	d912pxy_vfs_entry* items[PXY_VFS_MAX_BID];
 
-	d912pxy_vfs_entry items[PXY_VFS_MAX_BID];
+	void LoadPckFromRootPath();
 
+	d912pxy_vfs_pck* cuPck;
 
+	UINT32 cuWriteMask;
 };
 

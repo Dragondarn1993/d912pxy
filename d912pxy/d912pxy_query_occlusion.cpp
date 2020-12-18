@@ -37,11 +37,13 @@ UINT32 g_writeStack = 0;
 #define PXY_OCCLUSION_TYPE D3D12_QUERY_TYPE_OCCLUSION
 #define API_OVERHEAD_TRACK_LOCAL_ID_DEFINE PXY_METRICS_API_OVERHEAD_QUERY_OCCLUSION
 
-d912pxy_query_occlusion::d912pxy_query_occlusion(D3DQUERYTYPE Type) : d912pxy_query(Type)
-{
-	queryResult = 0;
-	queryOpened = 0;
-}
+d912pxy_query_occlusion::d912pxy_query_occlusion(D3DQUERYTYPE Type) 
+	: d912pxy_query(Type)
+	, queryResult(0)
+	, queryFinished(0)
+	, frameIdx(0)
+	, queryOpened(0)
+{ }
 
 
 d912pxy_query_occlusion * d912pxy_query_occlusion::d912pxy_query_occlusion_com(D3DQUERYTYPE Type)
@@ -65,7 +67,10 @@ D912PXY_METHOD_IMPL_NC(occ_Issue)(THIS_ DWORD dwIssueFlags)
 	if (dwIssueFlags & D3DISSUE_BEGIN)
 	{
 		if (g_gpuStack[g_writeStack].count >= PXY_INNER_MAX_OCCLUSION_QUERY_COUNT_PER_FRAME)
-			FlushQueryStack();			
+		{
+			LOG_ERR_DTDM("Too many occlusion queries per frame, performance will degrade ( > %u )", PXY_INNER_MAX_OCCLUSION_QUERY_COUNT_PER_FRAME);
+			FlushQueryStack();
+		}
 
 		//megai2: as we use addition on query result read due to inter-cl force close/open thingy, we need to clear result on fully open condition
 		if (!(dwIssueFlags & D3DISSUE_FORCED))
@@ -76,7 +81,7 @@ D912PXY_METHOD_IMPL_NC(occ_Issue)(THIS_ DWORD dwIssueFlags)
 
 		queryFinished++;
 		frameIdx = g_gpuStack[g_writeStack].count;
-		d912pxy_s.render.replay.QueryMark(this, 1);		
+		d912pxy_s.render.replay.DoQueryMark(this, 1);
 		g_gpuStack[g_writeStack].stack[frameIdx] = this;
 		ThreadRef(1);
 		queryOpened = 1;
@@ -84,7 +89,7 @@ D912PXY_METHOD_IMPL_NC(occ_Issue)(THIS_ DWORD dwIssueFlags)
 	}
 	else {
 		queryOpened = 0;
-		d912pxy_s.render.replay.QueryMark(this, 0);			
+		d912pxy_s.render.replay.DoQueryMark(this, 0);
 	}
 	
 	return D3D_OK;
@@ -93,14 +98,19 @@ D912PXY_METHOD_IMPL_NC(occ_Issue)(THIS_ DWORD dwIssueFlags)
 D912PXY_METHOD_IMPL_NC(occ_GetData)(THIS_ void* pData, DWORD dwSize, DWORD dwGetDataFlags)
 {
 	LOG_DBG_DTDM(__FUNCTION__);
-	
-	if(queryFinished)		
-		FlushQueryStack();
+		
+	if (queryFinished)
+	{
+		//flush only wheny app asks for flush and we are not executing work on gpu already
+		if ((D3DGETDATA_FLUSH & dwGetDataFlags) && (d912pxy_s.dx12.que.IsWorkCompleted() == 0))
+			FlushQueryStack();
 
-	((DWORD*)pData)[0] = queryResult;				
-	
-	return !queryFinished ? S_OK : S_FALSE;
+		return S_FALSE;
+	}
 
+	((DWORD*)pData)[0] = queryResult;
+	
+	return S_OK;
 }
 
 #undef D912PXY_METHOD_IMPL_CN
@@ -182,7 +192,7 @@ void d912pxy_query_occlusion::ForceClose()
 {
 	if (queryOpened)
 	{
-		d912pxy_s.render.replay.QueryMark(this, 0);
+		d912pxy_s.render.replay.DoQueryMark(this, 0);
 	}
 }
 
@@ -225,6 +235,16 @@ void d912pxy_query_occlusion::FreePendingQueryObjects()
 
 void d912pxy_query_occlusion::DeInitOccQueryEmulation()
 {
+	//finish outstanding queres so thery are properly freed on exit
+	d912pxy_query_occlusion_gpu_stack* readStack = &g_gpuStack[!g_writeStack];
+	if (readStack->count)
+	{
+		for (int i = 0; i != readStack->count; ++i)	
+			readStack->stack[i]->SetQueryResult(0);
+
+		readStack->count = 0;
+	}
+
 	if (!g_occQueryHeap)
 		return;
 

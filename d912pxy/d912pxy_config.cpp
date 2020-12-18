@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -34,31 +34,11 @@ d912pxy_config::~d912pxy_config()
 }
 
 void d912pxy_config::Init()
-{	
+{
 	FILE* f = fopen(d912pxy_helper::GetFilePath(FP_CONFIG)->s, "rb");
 
 	if (!f) {
-		f = fopen(d912pxy_helper::GetFilePath(FP_CONFIG)->s, "wb");
-
-		wchar_t csection[256] = L"0";
-
-
-		for (int i = 0; i != PXY_CFG_CNT; ++i)
-		{
-			if (lstrcmpW(csection, data[i].section))
-			{
-				fwprintf(f, L"\r\n[%s]\r\n", data[i].section);
-				lstrcpyW(csection, data[i].section);
-			}
-
-			fwprintf(f, L"%s=%s\r\n", data[i].name, data[i].value);
-		}
-
-		fwprintf(f, L"\r\n[end] \r\n");
-
-		fflush(f);
-		fclose(f);
-
+		SaveConfig();
 		return;
 	}
 
@@ -71,7 +51,11 @@ void d912pxy_config::Init()
 	fseek(f, 0, SEEK_SET);
 
 	if (fsz <= 0)
+	{
+		if (f)
+			fclose(f);
 		return;
+	}
 
 	int fptr = 0;
 
@@ -147,15 +131,15 @@ void d912pxy_config::Init()
 
 		if (valf)
 		{
-			for (int i = 0; i != PXY_CFG_CNT; ++i)
+			for (auto &&d : data)
 			{
-				if (lstrcmpW(section, data[i].section))
+				if (lstrcmpW(section, d.section))
 					continue;
 
-				if (lstrcmpW(param, data[i].name))
+				if (lstrcmpW(param, d.name))
 					continue;
 
-				lstrcpyW(data[i].value, val);
+				lstrcpyW(d.value, val);
 
 				break;
 			}
@@ -184,9 +168,86 @@ UINT32 d912pxy_config::GetValueUI32(d912pxy_config_value val)
 	return (UINT32)GetValueUI64(val);
 }
 
+bool d912pxy_config::GetValueB(d912pxy_config_value val)
+{
+	return GetValueUI32(val) >= 1;
+}
+
 wchar_t * d912pxy_config::GetValueRaw(d912pxy_config_value val)
 {
 	return &data[val].value[0];
+}
+
+void d912pxy_config::InitNewValueBuffers()
+{
+	for(int i = 0; i != PXY_CFG_CNT; ++i)
+	{
+		PXY_MALLOC(data[i].newValue, 255, char*);
+	}
+	ValueToNewValueBuffers();
+}
+
+void d912pxy_config::UnInitNewValueBuffers()
+{
+	for (int i = 0; i != PXY_CFG_CNT; ++i)
+	{
+		PXY_FREE(data[i].newValue);
+		data[i].newValue = nullptr;
+	}
+}
+
+void d912pxy_config::ValueToNewValueBuffers() 
+{
+	for (int i = 0; i != PXY_CFG_CNT; ++i)
+	{
+		wcstombs(data[i].newValue, data[i].value, 255);
+	}
+}
+
+void d912pxy_config::SaveConfig()
+{
+	FILE* f = fopen(d912pxy_helper::GetFilePath(FP_CONFIG)->s, "wb");
+
+	if (!f)
+	{
+		char buf[4096];
+		char cwd[4096];
+		GetCurrentDirectoryA(4096, cwd);
+
+		sprintf_s(buf, "Can't save config to %s, check folder write permissions! (cwd: %s)", d912pxy_helper::GetFilePath(FP_CONFIG)->s, cwd);
+		MessageBoxA(0, buf, "d912pxy error", MB_ICONERROR);
+		return;
+	}
+
+	wchar_t csection[256] = L"0";
+
+	bool writeNewValues = data[0].newValue != nullptr;
+
+	for (int i = 0; i != PXY_CFG_CNT; ++i)
+	{
+
+		if (lstrcmpW(csection, data[i].section))
+		{
+			fwprintf(f, L"\r\n[%s]\r\n", data[i].section);
+			lstrcpyW(csection, data[i].section);
+		}
+
+		if (writeNewValues)
+		{
+			wchar_t conversion_buffer[256] = {0};
+			mbstowcs(conversion_buffer, data[i].newValue, 255);
+			fwprintf(f, L"%s=%s\r\n", data[i].name, conversion_buffer);
+		}
+		else 
+		{
+			fwprintf(f, L"%s=%s\r\n", data[i].name, data[i].value);
+		}
+	}
+
+	fwprintf(f, L"\r\n[end] \r\n");
+
+	fflush(f);
+	fclose(f);
 }
 
 d912pxy_config_value_dsc * d912pxy_config::GetEntryRaw(d912pxy_config_value val)

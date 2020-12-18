@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -47,6 +47,10 @@ public:
 	UINT TotalElements() { return writed; };
 
 	ElementType PopElementMTG();
+
+	void* GetBufferBase();
+	ElementType GetElementOffset(UINT index);
+	ElementType* GetElementOffsetPtr(UINT index);
 		
 private:
 	intptr_t bufferData;
@@ -56,7 +60,7 @@ private:
 
 	LONG maxElements;
 	UINT grow;
-	LONG writed;
+	std::atomic<LONG> writed;
 
 	d912pxy_thread_lock growthLock;
 	d912pxy_thread_lock writeLock;

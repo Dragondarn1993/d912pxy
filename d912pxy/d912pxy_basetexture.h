@@ -25,13 +25,33 @@ SOFTWARE.
 #pragma once
 #include "stdafx.h"
 
+#pragma pack(push, 1)
+
+struct d912pxy_basetexture_cache_data
+{
+	UINT32 srvId;
+	union 
+	{
+		struct 
+		{
+			UINT16 shouldBarrier;
+			UINT16 compareFormat;
+		};
+		UINT32 extraData;
+	};
+};
+
+#pragma pack(pop)
+
 class d912pxy_basetexture : private d912pxy_vtable, public d912pxy_resource
 {
 public:
 	d912pxy_basetexture();
 	~d912pxy_basetexture();
 
+	UINT GetSRVHeapId();
 	UINT GetSRVHeapId(UINT mode);
+	bool UsesCompareFormat() { return attachedCache.compareFormat > 0; }
 
 	D912PXY_METHOD_(DWORD, SetLOD)(PXY_THIS_ DWORD LODNew);
 	D912PXY_METHOD_(DWORD, GetLOD)(PXY_THIS);
@@ -49,9 +69,9 @@ public:
 	UINT FinalRelease();
 
 protected:
-	UINT32 srvIDc[2];
+	d912pxy_basetexture_cache_data attachedCache;
 
-	d912pxy_surface * baseSurface;
+	d912pxy_surface * baseSurface = nullptr;
 
 	UINT m_levels;	
 };

@@ -25,7 +25,7 @@ SOFTWARE.
 #pragma once
 #include "stdafx.h"
 
-#define PXY_INNER_MAX_SHADER_LISTING_LEN 1024 * 1024
+#define PXY_INNER_MAX_SHADER_LISTING_LEN (1024 * 1024)
 
 #define PXY_SHADER_TYPE_PS 0
 #define PXY_SHADER_TYPE_VS 1
@@ -37,6 +37,7 @@ public:
 
 	d912pxy_shader(const wchar_t * shtName, const DWORD* fun, d912pxy_shader_uid uid, UINT isVS);	
 	~d912pxy_shader();
+	d912pxy_shader(const d912pxy_shader&) = delete;
 
 	D912PXY_METHOD(GetFunction)(PXY_THIS_ void* arg, UINT* pSizeOfData);
 
@@ -45,6 +46,7 @@ public:
 	D912PXY_METHOD_NC_(ULONG, ReleaseWithPairRemoval)(THIS);
 	
 	D3D12_SHADER_BYTECODE* GetCode();
+	d912pxy_mem_block GetHLSLSource();
 
 	d912pxy_shader_uid GetID();
 

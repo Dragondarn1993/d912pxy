@@ -31,7 +31,7 @@ int read_user_integer(int defv)
 		try {
 			ret = std::stoi(str);
 		}
-		catch (std::invalid_argument) {
+		catch (const std::invalid_argument &) {
 			return -1;
 		}
 	}
@@ -66,10 +66,26 @@ bool ReadUserYN(bool defaultY)
 
 }
 
+#include "../thirdparty/cpu_arch_test.inc"
+
 int action_install()
 {
 	std::string installPath = "..\\bin64\\";
 	std::string installSource = "release\\";
+
+	cpu_arch arch = GetCPUArch();
+
+	if (arch.AVX2)
+		installSource = "release_avx2\\";
+	else if (arch.AVX)
+		installSource = "release_avx\\";
+	else if (!arch.SSE)
+	{
+		std::cout << "Your CPU need SSE support in order to use this tool\n";
+		system("pause");
+		return -1;
+	}
+
 	std::string installFile = "d3d9.dll";
 
 	if (!install_next_to_d912pxy_folder)
@@ -122,10 +138,10 @@ int action_install()
 
 	if (!ReadUserYN(1))
 	{
-		std::cout << "Select configuration: \n\n";		
+		std::cout << "Select configuration: \n\n";
 		std::cout << "1. Release_pp  - performance data collection \n";
 		std::cout << "2. Release_d   - in-depth debug logging \n";
-		std::cout << "3. Debug       - debug build\n";		
+		std::cout << "3. Debug       - debug build\n";
 
 		std::cout << "\n[default: Release_pp]: ";
 
@@ -328,35 +344,10 @@ int action_remove()
 
 int action_clear_shader_cache()
 {
-	std::cout << "Clear pck_bns (all but profiles) ? ";
+	std::cout << "Deleting latest.pck in pck and pck_bns \n";
 
-	if (ReadUserYN(0))
-	{
-		system("del /Q pck_bns\\derived_cso_ps.pck");
-		system("del /Q pck_bns\\derived_cso_vs.pck");
-		system("del /Q pck_bns\\pso_cache.pck");
-		system("del /Q pck_bns\\pso_precompile.pck");
-		system("del /Q pck_bns\\shader_sources.pck");
-		system("del /Q pck_bns\\shader_cso.pck");		
-	}
-
-	std::cout << "Clear derived cso, sources and PSO precompile cache? ";
-
-	if (ReadUserYN(0))
-	{
-		system("del /Q pck\\derived_cso_ps.pck");
-		system("del /Q pck\\derived_cso_vs.pck");
-		system("del /Q pck\\pso_cache.pck");
-		system("del /Q pck\\pso_precompile.pck");
-		system("del /Q pck\\shader_sources.pck");
-	}
-
-	std::cout << "Remove profiles too? ";
-
-	if (ReadUserYN(0))
-	{
-		system("del /Q pck\\shader_profiles.pck");
-	}
+	system("del /Q pck_bns\\latest.pck");
+	system("del /Q pck\\latest.pck");
 
 	std::cout << "Perform additional hlsl sources cleaning? ";
 
@@ -364,8 +355,6 @@ int action_clear_shader_cache()
 	{
 		system("del /Q shaders\\hlsl\\*");
 	}
-
-	system("del /Q pck\\shader_cso.pck");
 
 	std::cout << "Finished \n";
 

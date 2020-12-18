@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -32,18 +32,27 @@ public:
 	~d912pxy_cleanup_thread();
 
 	void Init();
+	void UnInit();
 
 	void ThreadJob();
 	void Watch(d912pxy_comhandler* obj);
 
 	UINT TotalWatchedItems() { return watchCount; };
+	void ForceCleanup(); 
+
+	void OnReset();
 
 private:
-	d912pxy_linked_list<d912pxy_comhandler*>* buffer;
+	d912pxy_linked_list<d912pxy_comhandler*>* buffer = nullptr;
 	UINT watchCount;
+	d912pxy_thread_lock forcedCleanup;
 	
 	UINT iterationPeriod;
 	UINT iterationSubsleep;
 	UINT lifetime;
+	UINT softLimit;
+	UINT hardLimit;
+	UINT afterResetMaidPasses;
+	UINT afterResetMaidTriggered;
 };
 

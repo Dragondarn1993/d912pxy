@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -31,17 +31,17 @@ class d912pxy_device;
 
 typedef struct d912pxy_resource_ptr {
 	intptr_t host;
-	intptr_t dev;
+	UINT64 dev;
 } d912pxy_resource_ptr;
 
 enum d912pxy_resource_typeid {
-	RTID_SURFACE,
-	RTID_VOLUME,
-	RTID_TEX,
-	RTID_VTEX,
-	RTID_CTEX,
-	RTID_VBUF,
-	RTID_IBUF,	
+	RTID_SURFACE = 1,
+	RTID_VOLUME = 2,
+	RTID_TEX = 3,
+	RTID_VTEX = 4,
+	RTID_CTEX = 5,
+	RTID_VBUF = 6,
+	RTID_IBUF = 7,	
 	RTID_UL_BUF,
 	RTID_CBUFFER,
 	RTID_RB_BUF,
@@ -97,9 +97,8 @@ public:
 	void BCopyTo(d912pxy_resource* dst, UINT barriers, ID3D12GraphicsCommandList* cq);
 	void BCopyToWStates(d912pxy_resource* dst, UINT barriers, ID3D12GraphicsCommandList* cq, D3D12_RESOURCE_STATES dstStateCache, D3D12_RESOURCE_STATES srcStateCache);
 		
-	intptr_t GetVA_GPU();
-	void GetCopyableFootprints(UINT subres, D3D12_PLACED_SUBRESOURCE_FOOTPRINT* ret);
-
+	UINT64 GetVA_GPU();
+	
 	static UINT residencyOverride;
 
 private: 
@@ -108,7 +107,7 @@ private:
 protected:
 	ID3D12Resource* m_res;
 	
-	d912pxy_dheap* dHeap;
+	d912pxy_dheap* dHeap=nullptr;
 
 	D3D12_RESOURCE_STATES stateCache;	
 

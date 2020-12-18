@@ -25,16 +25,17 @@ SOFTWARE.
 #include "stdafx.h"
 
 d912pxy_surface_layer::d912pxy_surface_layer(d912pxy_com_object * iBase, UINT32 iSubres, UINT32 iBSize, UINT32 iWPitch, UINT32 iWidth, UINT32 imemPerPix)
+	: base(iBase)
+	, subres(iSubres)
+	, wPitch(iWPitch)
+	, width(iWidth)
+	, memPerPix(imemPerPix)
+	, lockDepth(0)
+	, lockWrite(0)
+	, isDrect(0)
+	, drect{ 0 }
 {
-	base = iBase;
-	subres = iSubres;
-	wPitch = iWPitch;
-	width = iWidth;
-	memPerPix = imemPerPix;	
-	
 	PXY_MALLOC_GPU_HOST_COPY(surfMem, iBSize, void*);
-
-	intRefc = 0;
 }
 
 d912pxy_surface_layer::~d912pxy_surface_layer()
@@ -46,31 +47,23 @@ d912pxy_surface_layer::~d912pxy_surface_layer()
 
 D912PXY_METHOD_IMPL_NC(QueryInterface)(THIS_ REFIID riid, void** ppvObj)
 {
-	return PXY_COM_CAST(IUnknown, base)->QueryInterface(riid, ppvObj);
+	return base->com.QueryInterface(riid, ppvObj);
 }
 
 D912PXY_METHOD_IMPL_NC_(ULONG, AddRef)(THIS)
 {
-	++intRefc;
-
-	PXY_COM_CAST(IUnknown, base)->AddRef();
-
-	return intRefc;
+	return base->com.AddRef();
 }
 
 D912PXY_METHOD_IMPL_NC_(ULONG, Release)(THIS)
 {
-	--intRefc;
-
-	PXY_COM_CAST(IUnknown, base)->Release();
-
-	return intRefc;
+	return base->com.Release();
 }
-
 
 D912PXY_METHOD_IMPL_NC(GetDesc)(THIS_ D3DSURFACE_DESC *pDesc)
 {
-	return PXY_COM_CAST(IDirect3DSurface9, base)->GetDesc(pDesc);
+	*pDesc = base->surface.GetDX9DescAtLevel(subres);
+	return D3D_OK;
 }
 
 D912PXY_METHOD_IMPL_NC(LockRect)(THIS_ D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags)
@@ -79,7 +72,7 @@ D912PXY_METHOD_IMPL_NC(LockRect)(THIS_ D3DLOCKED_RECT* pLockedRect, CONST RECT* 
 
 	if (pRect)
 	{
-		pLockedRect->pBits = (void*)((intptr_t)surfMemRef + (intptr_t)(pRect->left*memPerPix + pRect->top*wPitch));
+		pLockedRect->pBits = (void*)((intptr_t)surfMemRef + ((intptr_t)pRect->left*memPerPix + (intptr_t)pRect->top*wPitch));
 	}
 	else {
 		pLockedRect->pBits = (void*)((intptr_t)surfMemRef);
@@ -126,7 +119,7 @@ void * d912pxy_surface_layer::SurfacePixel(UINT32 x, UINT32 y)
 {
 	void* surfMemRef = surfMem;
 
-	return (void*)((intptr_t)surfMemRef + (intptr_t)((x + y*width)*memPerPix));
+	return (void*)((intptr_t)surfMemRef + (x + (intptr_t)y*width)*memPerPix);
 }
 
 d912pxy_surface_layer * d912pxy_surface_layer::d912pxy_surface_layer_com(d912pxy_com_object * iBase, UINT32 iSubres, UINT32 iBSize, UINT32 iWPitch, UINT32 iWidth, UINT32 imemPerPix)

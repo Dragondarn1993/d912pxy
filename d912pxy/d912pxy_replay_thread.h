@@ -31,10 +31,11 @@ class d912pxy_replay_thread :
 public:
 	d912pxy_replay_thread(d912pxy_gpu_cmd_list_group iListGrp, char* threadName);
 	~d912pxy_replay_thread();
+	d912pxy_replay_thread(const d912pxy_replay_thread&) = delete;
 
 	void ThreadJob();
 
-	void ExecRange(UINT start, UINT end);
+	void ExecItems(UINT items);
 
 	void Finish();
 	void ThreadInitProc();

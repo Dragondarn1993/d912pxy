@@ -1,5 +1,11 @@
 #include "stdafx.h"
 
+#if _WIN64
+	#define SRV_GET_MODE (intptr_t)newTex & PXY_COM_OBJ_SIGNATURE_TEXTURE_RTDS
+#else
+	#define SRV_GET_MODE 
+#endif
+
 d912pxy_texture_state::d912pxy_texture_state() 
 {
 	memset(DX9SSTValues, 7, sizeof(DWORD)*(D3DSAMP_DMAPOFFSET+1));
@@ -7,18 +13,7 @@ d912pxy_texture_state::d912pxy_texture_state()
 
 d912pxy_texture_state::~d912pxy_texture_state()
 {
-	splLookup->Begin();
 
-	while (!splLookup->IterEnd())
-	{
-		UINT32 cid = splLookup->CurrentCID() & 0xFFFFFFFF;
-		if (cid)
-			samplerHeap->FreeSlot(cid - 1);
-
-		splLookup->Next();
-	}
-
-	delete splLookup;
 }
 
 void d912pxy_texture_state::Init()
@@ -26,8 +21,6 @@ void d912pxy_texture_state::Init()
 	NonCom_Init(L"texture state");
 
 	samplerHeap = d912pxy_s.dev.GetDHeap(PXY_INNER_HEAP_SPL);
-
-	splLookup = new d912pxy_memtree2(sizeof(d912pxy_trimmed_sampler_dsc), 20, 2);
 
 	UINT16 defaultMinLOD = (UINT16)d912pxy_s.config.GetValueUI64(PXY_CFG_SAMPLERS_MIN_LOD);
 
@@ -47,12 +40,41 @@ void d912pxy_texture_state::Init()
 	current.dirty = 0xFFFFFFFFFF;
 }
 
-void d912pxy_texture_state::SetTexture(UINT stage, UINT srv)
+void d912pxy_texture_state::UnInit()
+{
+	for (auto i = splLookup.begin(); i < splLookup.end(); ++i)
+	{
+		uint32_t cid = i.value();
+		if (cid)
+			samplerHeap->FreeSlot(cid - 1);
+	}
+
+	d912pxy_noncom::UnInit();
+}
+
+void d912pxy_texture_state::SetTextureSrvId(UINT stage, UINT srv)
 {
 	current.dirty |= 1ULL << (stage >> 2);
 	current.texHeapID[stage] = srv;
 
 	LOG_DBG_DTDM("tex[%u] = %u", stage, srv);
+}
+
+void d912pxy_texture_state::SetTexture(UINT stage, d912pxy_basetexture* texRef)
+{
+	current.dirtyTexRefs |= (1ULL << stage);
+	current.texRefs[stage] = texRef;
+
+	LOG_DBG_DTDM("texRef[%u] = %p", stage, texRef);
+}
+
+void d912pxy_texture_state::ModStageByMask(UINT stage, UINT srv, UINT mask)
+{
+	current.dirty |= 1ULL << (stage >> 2);
+			
+	current.texHeapID[stage] = (current.texHeapID[stage] & mask) | srv;
+
+	LOG_DBG_DTDM("tex[%u] = %u", stage, current.texHeapID[stage]);
 }
 
 void d912pxy_texture_state::ModStageBit(UINT stage, UINT bit, UINT set)
@@ -100,7 +122,7 @@ void d912pxy_texture_state::ModSampler(UINT stage, D3DSAMPLERSTATETYPE state, DW
 		cDesc->MinLOD = (UINT16)value;
 		break;
 	case D3DSAMP_MIPMAPLODBIAS:		
-		cDesc->MipLODBias = (UINT16)value;
+		cDesc->MipLODBias = (INT16)(max(D3D12_MIP_LOD_BIAS_MIN, min(D3D12_MIP_LOD_BIAS_MAX, *((float*)&value))));
 		break;
 	case D3DSAMP_SRGBTEXTURE:
 	    ModStageBit(30, stage, value);
@@ -127,6 +149,29 @@ void d912pxy_texture_state::ModSampler(UINT stage, D3DSAMPLERSTATETYPE state, DW
 
 UINT d912pxy_texture_state::Use()
 {	
+	if (current.dirtyTexRefs)
+	{
+		UINT64 dMask = current.dirtyTexRefs;
+		current.dirtyTexRefs = 0;
+		for (int i = 0; i < 32 && dMask; ++i,dMask >>= 1)
+		{
+			if ((dMask & 1) == 0)
+				continue;			
+
+			d912pxy_basetexture* newTex = current.texRefs[i];
+			UINT64 srvId = 0;//megai2: make this to avoid memory reading. but we must be assured that mNullTextureSRV is equal to this constant!
+			if (newTex)
+			{
+				srvId = newTex->GetSRVHeapId(SRV_GET_MODE);
+				d912pxy_s.render.state.pso.UpdateCompareSampler(i, newTex->UsesCompareFormat());
+			}
+			else
+				d912pxy_s.render.state.pso.UpdateCompareSampler(i, false);
+
+			d912pxy_s.render.state.tex.SetTextureSrvId(i, (UINT32)srvId);
+		}
+	}
+
 	if (!current.dirty)
 		return 0;
 	
@@ -169,26 +214,39 @@ void d912pxy_texture_state::AddDirtyFlag(DWORD val)
 	current.dirty |= val;
 }
 
-UINT d912pxy_texture_state::LookupSamplerId(UINT stage)
+void d912pxy_texture_state::ClearActiveTextures()
 {
-	UINT ret = (UINT32)splLookup->PointAt32(&trimmedSpl[stage]);
+	//stage 31 is hardcoded atest value, not actual texture stage
+	for (int i = 0; i != PXY_INNER_MAX_TEXTURE_STAGES - 1; ++i)
+	{
+		SetTexture(i, 0);
+	}
+}
+
+UINT d912pxy_texture_state::LookupSamplerId(const d912pxy_trimmed_sampler_dsc& trimmedDsc)
+{
+	uint32_t& ret = splLookup[trimmedDsc];
 
 	if (ret != 0)
-	{		
 		return ret - 1;
-	}
 
-	UpdateFullSplDsc(stage);
+	UpdateFullSplDsc(trimmedDsc);
+
 	ret = CreateNewSampler();
-	
+
 	return ret;
 }
 
-void d912pxy_texture_state::UpdateFullSplDsc(UINT from)
+UINT d912pxy_texture_state::LookupSamplerId(UINT stage)
+{
+	return LookupSamplerId(trimmedSpl[stage]);
+}
+
+void d912pxy_texture_state::UpdateFullSplDsc(const d912pxy_trimmed_sampler_dsc& trimmedSpl)
 {
 	//megai2: handle filter type for real
 
-	UINT16 dx9FilterName = trimmedSpl[from].Dsc0;
+	UINT16 dx9FilterName = trimmedSpl.Dsc0;
 
 	D3D12_FILTER dx12Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
 
@@ -231,7 +289,7 @@ void d912pxy_texture_state::UpdateFullSplDsc(UINT from)
 
 	splDsc.Filter = dx12Filter;
 
-	UINT16 dx9FilterAWA = trimmedSpl[from].Dsc1;
+	UINT16 dx9FilterAWA = trimmedSpl.Dsc1;
 
 	splDsc.AddressU = (D3D12_TEXTURE_ADDRESS_MODE)((dx9FilterAWA) & 0x7);
 	splDsc.AddressV = (D3D12_TEXTURE_ADDRESS_MODE)((dx9FilterAWA >> 3) & 0x7);
@@ -248,8 +306,8 @@ void d912pxy_texture_state::UpdateFullSplDsc(UINT from)
 		splDsc.BorderColor[i] = bTmp;
 	}*/
 
-	splDsc.MipLODBias = trimmedSpl[from].MipLODBias;
-	splDsc.MinLOD = trimmedSpl[from].MinLOD;
+	splDsc.MipLODBias = trimmedSpl.MipLODBias;
+	splDsc.MinLOD = trimmedSpl.MinLOD;
 }
 
 UINT d912pxy_texture_state::CreateNewSampler()
@@ -258,9 +316,5 @@ UINT d912pxy_texture_state::CreateNewSampler()
 		splDsc.Filter, splDsc.MinLOD, splDsc.MaxLOD, splDsc.MipLODBias, splDsc.AddressU, splDsc.AddressV, splDsc.AddressW, splDsc.MaxAnisotropy,
 		splDsc.BorderColor[0], splDsc.BorderColor[1], splDsc.BorderColor[2], splDsc.BorderColor[3]);
 
-	UINT ret = samplerHeap->CreateSampler(&splDsc);
-	
-	splLookup->SetValue(ret + 1);
-
-	return ret;
+	return samplerHeap->CreateSampler(&splDsc)+1;
 }

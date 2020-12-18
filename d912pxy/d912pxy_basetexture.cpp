@@ -43,14 +43,14 @@ D912PXY_METHOD_IMPL_NC_(DWORD, GetPriority_SRVhack)(THIS)
 
 #undef D912PXY_METHOD_IMPL_CN
 
-UINT d912pxy_basetexture::GetSRVHeapId(UINT mode)
+UINT d912pxy_basetexture::GetSRVHeapId()
 {
-	if (mode)
-	{
-		return baseSurface->GetSRVHeapIdRTDS();
-	}
-	else
-		return srvIDc[0];
+	return GetSRVHeapId(attachedCache.shouldBarrier);
+}
+
+UINT d912pxy_basetexture::GetSRVHeapId(UINT genBarrier)
+{
+	return genBarrier ? baseSurface->GetSRVHeapIdRTDS() : attachedCache.srvId;
 }
 
 UINT d912pxy_basetexture::FinalRelease()
@@ -61,7 +61,7 @@ UINT d912pxy_basetexture::FinalRelease()
 		//megai2: keep threadRef if surface is still in use, otherwise free surface and remove threadRef
 		if (baseSurface->GetCOMRefCount() == 1)
 		{
-			baseSurface->Release_Surface();
+			baseSurface->Release();
 			ThreadRef(-1);
 		}
 	}

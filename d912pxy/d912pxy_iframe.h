@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -34,6 +34,7 @@ public:
 	~d912pxy_iframe();
 
 	void Init(d912pxy_dheap** heaps);
+	void UnInit();
 
 	void SetStreamFreq(UINT StreamNumber, UINT Divider);
 	void SetVBuf(d912pxy_vstream* vb, UINT StreamNumber, UINT OffsetInBytes, UINT Stride);
@@ -46,19 +47,22 @@ public:
 
 	d912pxy_vstream* GetIBuf();
 	d912pxy_device_streamsrc GetStreamSource(UINT StreamNumber);
-		
-	UINT CommitBatchPreCheck(D3DPRIMITIVETYPE PrimitiveType);
+			
 	void CommitBatch(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
 	void CommitBatch2(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
+	void CommitBatchTailProc(D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount);
+	bool CommitBatchHeadProc(D3DPRIMITIVETYPE PrimitiveType);
+	void ExtractInstanceCount();
+	void ExtractInstanceCountExtra();
+	void ExtractBatchDataFromStream(int stream);
+	UINT CommitBatchPreCheck(D3DPRIMITIVETYPE PrimitiveType);
 
 	void TransitZBufferRW(int write);
 	void BindSurface(UINT index, d912pxy_surface* obj);
 	void ClearBindedSurfaces();
 	d912pxy_surface* GetBindedSurface(UINT index) { return bindedSurfaces[index]; };
 
-	void InstancedVDecl(d912pxy_vdecl* src);
-	
-	UINT GetInstanceCount() { return instanceCount; };
+	UINT GetInstanceCount() { return batchCommitData.instanceCount; };
 
 	void Start();
 	void End();
@@ -98,6 +102,35 @@ public:
 
 	UINT GetActiveStreamCount() { return streamsActive; };
 
+	struct StreamBinds
+	{
+		d912pxy_device_streamsrc vertex[PXY_INNER_MAX_VBUF_STREAMS];
+		d912pxy_vstream* index;
+	};
+
+	class StreamBindsHolder
+	{
+	public:
+		StreamBindsHolder();
+		~StreamBindsHolder();
+
+	private:
+		StreamBinds data;
+		d912pxy_iframe& iframe;
+	};
+
+	struct BatchCommitData
+	{
+		UINT batchDF;
+		UINT32 instancedModMask;
+		UINT instanceCount;
+	};
+
+	void OverrideRootSignature(ID3D12RootSignature* newRS);
+	void FillPrimaryRSDescriptorRanges(D3D12_DESCRIPTOR_RANGE* ranges);
+	void FillPrimaryRSParameters(D3D12_ROOT_PARAMETER* rootParameters, D3D12_DESCRIPTOR_RANGE* ranges);
+	void FillPrimaryRSstaticPCFSampler(D3D12_STATIC_SAMPLER_DESC& staticPCF);
+
 private:	
 	void InitRootSignature();
 
@@ -112,18 +145,17 @@ private:
 	d912pxy_surface* zeroWriteRT;
 	
 	D3D12_CPU_DESCRIPTOR_HANDLE bindedSurfacesDH[1 + PXY_INNER_MAX_RENDER_TARGETS];
-	D3D12_CPU_DESCRIPTOR_HANDLE* bindedRTV;
 	UINT bindedRTVcount;
-	D3D12_CPU_DESCRIPTOR_HANDLE* bindedDSV;
 
 	UINT streamsActive;
-	UINT batchCommisionDF;
-	UINT instanceCount;
+	UINT batchCommisionDF;	
 	D3DPRIMITIVETYPE cuPrimType;
-	d912pxy_device_streamsrc streamBinds[PXY_INNER_MAX_VBUF_STREAMS];
-	d912pxy_vstream* indexBind;
+	BatchCommitData batchCommitData;
+
+	StreamBinds streamBinds;
 
 	UINT mCurrentFrameIndex;
+	UINT batchLimit;
 
 	D3D12_VIEWPORT main_viewport;
 	D3D12_RECT main_scissor;

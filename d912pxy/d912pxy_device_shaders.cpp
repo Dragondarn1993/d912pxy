@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -28,14 +28,14 @@ SOFTWARE.
 
 HRESULT d912pxy_device::SetVertexShader(IDirect3DVertexShader9* pShader)
 {
-	d912pxy_s.render.db.pso.VShader(PXY_COM_LOOKUP(pShader, shader));
+	d912pxy_s.render.state.pso.VShader(PXY_COM_LOOKUP(pShader, shader));
 		
 	return D3D_OK;
 }
 
 HRESULT d912pxy_device::SetPixelShader(IDirect3DPixelShader9* pShader) 
 {
-	d912pxy_s.render.db.pso.PShader(PXY_COM_LOOKUP(pShader, shader));
+	d912pxy_s.render.state.pso.PShader(PXY_COM_LOOKUP(pShader, shader));
 		
 	return D3D_OK;
 }
@@ -72,6 +72,26 @@ HRESULT d912pxy_device::SetPixelShaderConstantF(UINT StartRegister, CONST float*
 	return D3D_OK;
 }
 
+HRESULT d912pxy_device::GetVertexShader(IDirect3DVertexShader9** ppShader)
+{
+	IDirect3DVertexShader9* vsObj = PXY_COM_CAST_(IDirect3DVertexShader9, d912pxy_s.render.state.pso.GetVShader());
+	if (vsObj)
+		vsObj->AddRef();
+
+	*ppShader = vsObj;		
+	return D3D_OK;
+}
+
+HRESULT d912pxy_device::GetPixelShader(IDirect3DPixelShader9** ppShader)
+{
+	IDirect3DPixelShader9* psObj = PXY_COM_CAST_(IDirect3DPixelShader9, d912pxy_s.render.state.pso.GetPShader());
+	if (psObj)
+		psObj->AddRef();
+
+	*ppShader = psObj;
+	return D3D_OK;
+}
+
 ID3D12RootSignature * d912pxy_device::ConstructRootSignature(D3D12_ROOT_SIGNATURE_DESC* rootSignatureDesc)
 {
 	ComPtr<ID3DBlob> signature;
@@ -95,37 +115,6 @@ ID3D12RootSignature * d912pxy_device::ConstructRootSignature(D3D12_ROOT_SIGNATUR
 	LOG_ERR_THROW2(d912pxy_s.dx12.dev->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&rsObj)), "CreateRootSignature failed");
 
 	return rsObj;
-}
-
-void d912pxy_device::TrackShaderCodeBugs(UINT type, UINT val, d912pxy_shader_uid faultyId)
-{
-	UINT32 size;
-	UINT32* data = (UINT32*)d912pxy_s.vfs.LoadFileH(faultyId, &size, PXY_VFS_BID_SHADER_PROFILE);
-
-	if (data == NULL)
-	{
-		PXY_MALLOC(data, PXY_INNER_SHDR_BUG_FILE_SIZE, UINT32*);
-		ZeroMemory(data, PXY_INNER_SHDR_BUG_FILE_SIZE);
-		data[type] = val;
-
-		d912pxy_s.vfs.WriteFileH(faultyId, data, PXY_INNER_SHDR_BUG_FILE_SIZE, PXY_VFS_BID_SHADER_PROFILE);
-	}
-	else {
-
-		if (size != PXY_INNER_SHDR_BUG_FILE_SIZE)
-		{
-			LOG_ERR_THROW2(-1, "wrong shader profile file size");
-		}
-
-		if (data[type] != val)
-		{
-			data[type] = val;
-
-			d912pxy_s.vfs.ReWriteFileH(faultyId, data, PXY_INNER_SHDR_BUG_FILE_SIZE, PXY_VFS_BID_SHADER_PROFILE);
-		}
-	}
-
-	PXY_FREE(data);
 }
 
 #undef API_OVERHEAD_TRACK_LOCAL_ID_DEFINE 

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -32,34 +32,36 @@ d912pxy_shader_db::d912pxy_shader_db()
 
 d912pxy_shader_db::~d912pxy_shader_db()
 {
-	shaderPairs->Begin();
-
-	while (!shaderPairs->IterEnd())
-	{
-		UINT64 cid = shaderPairs->CurrentCID();
-		if (cid)
-		{
-			d912pxy_shader_pair* item = (d912pxy_shader_pair*)cid;
-
-			delete item;
-		}
-		shaderPairs->Next();
-	}
-
-	delete shaderPairs;
 }
 
 void d912pxy_shader_db::Init()
 {
 	NonCom_Init(L"shader database");
+}
 
-	shaderPairs = new d912pxy_memtree2(sizeof(d912pxy_shader_pair_hash_type), 0xFF, 2);
+void d912pxy_shader_db::UnInit()
+{
+	for (auto iter = shaderPairs.begin(); iter < shaderPairs.end(); ++iter)
+	{
+		d912pxy_shader_pair*& pair = iter.value();
+		delete pair;
+	}
 
-	precompileFlag = (UINT)d912pxy_s.config.GetValueUI64(PXY_CFG_SDB_USE_PSO_PRECOMPILE);
+	d912pxy_noncom::UnInit();
 }
 
 d912pxy_shader_uid d912pxy_shader_db::GetUID(DWORD * code, UINT32* len)
 {
+/*
+	//this is not optimal! but fancy? FUU!
+	UINT ctr = 0;
+	while (code[ctr] != 0x0000FFFF)
+		++ctr;
+
+	*len = (ctr >> 2) + 1;
+	return d912pxy::Hash64(d912pxy::MemoryBlock((void*)code, len));
+*/
+
 	UINT64 hash = 0xcbf29ce484222325;
 	UINT ctr = 0;
 
@@ -88,41 +90,35 @@ d912pxy_shader_pair_hash_type d912pxy_shader_db::GetPairUID(d912pxy_shader * vs,
 	return ha;
 }
 
-d912pxy_shader_pair * d912pxy_shader_db::GetPair(d912pxy_shader* vs, d912pxy_shader* ps)
-{	
+d912pxy_shader_pair* d912pxy_shader_db::GetPair(d912pxy_shader* vs, d912pxy_shader* ps)
+{
 	d912pxy_shader_pair_hash_type ha = GetPairUID(vs, ps);
-		
-	d912pxy_shader_pair* it = (d912pxy_shader_pair*)shaderPairs->PointAtMemMTR(&ha, sizeof(d912pxy_shader_pair_hash_type));
-	
-	if (it)
-	{		
-		return it;
+
+	d912pxy::mt::containter::OptRef<ShaderPairStorage> ref(shaderPairs, ha);
+
+	if (!ref.val)
+	{
+		d912pxy_shader_uid pdc[2] = { vs->GetID(), ps->GetID() };
+
+		ref.add() = new d912pxy_shader_pair(ha, pdc);
+
+		vs->NotePairUsage(ha);
+		ps->NotePairUsage(ha);
 	}
-	else {
-		it = (d912pxy_shader_pair*)shaderPairs->PointAtMemMTRW(&ha, sizeof(d912pxy_shader_pair_hash_type));
 
-		if (!it)
-		{
-			d912pxy_shader_uid pdc[2] = { vs->GetID(), ps->GetID() };
-
-			it = new d912pxy_shader_pair(ha, pdc);
-
-			vs->NotePairUsage(ha);
-			ps->NotePairUsage(ha);
-		}
-	
-		shaderPairs->PointAtMemMTW((intptr_t)it);
-
-		return it;
-	}
+	return *ref.val;
 }
 
 void d912pxy_shader_db::DeletePair(d912pxy_shader_pair_hash_type ha)
 {
-	d912pxy_shader_pair* it = (d912pxy_shader_pair*)shaderPairs->PointAtMemMTRW(&ha, sizeof(d912pxy_shader_pair_hash_type));
+	d912pxy_shader_pair* pair = nullptr;
 
-	shaderPairs->PointAtMemMTW(0);
-	
-	if (it)
-		delete it;		
+	{
+		d912pxy::mt::containter::OptRef<ShaderPairStorage> ref(shaderPairs, ha);
+
+		if (ref.val)
+			pair = *ref.val;
+	}
+
+	delete pair;
 }

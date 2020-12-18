@@ -46,7 +46,7 @@ d912pxy_shader_code d912pxy_shader_replacer::CompileFromHLSL_CS(const wchar_t* b
 	wchar_t replFn[1024];
 
 	//megai2: %016llX bugged out
-	wsprintf(replFn, L"%s/%08lX%08lX.hlsl", bfolder, mUID >> 32, mUID & 0xFFFFFFFF);
+	wsprintf(replFn, L"%s/%08lX%08lX.hlsl", bfolder, (int)(mUID >> 32), (int)(mUID & 0xFFFFFFFF));
 
 	char targetCompiler[] = "cs_5_1";
 
@@ -105,7 +105,7 @@ d912pxy_shader_code d912pxy_shader_replacer::CompileFromHLSL(const wchar_t* bfol
 	wchar_t replFn[1024];
 
 	//megai2: %016llX bugged out
-	wsprintf(replFn, L"%s/%08lX%08lX.hlsl", bfolder, mUID >> 32, mUID & 0xFFFFFFFF);
+	wsprintf(replFn, L"%s/%08lX%08lX.hlsl", bfolder, (int)(mUID >> 32), (int)(mUID & 0xFFFFFFFF));
 
 	char targetCompiler[] = "ps_5_1";
 
@@ -172,7 +172,7 @@ d912pxy_shader_code d912pxy_shader_replacer::CompileFromHLSL_MEM(const wchar_t* 
 	char replFn[1024];
 
 	//megai2: %016llX bugged out
-	sprintf(replFn, "%S/%016llX.hlsl", bfolder, mUID);
+	sprintf(replFn, "%S/%08lX%08lX.hlsl", bfolder, (int)(mUID >> 32), (int)(mUID & 0xFFFFFFFF));
 
 	char targetCompiler[] = "ps_5_1";
 
@@ -229,7 +229,7 @@ d912pxy_shader_code d912pxy_shader_replacer::CompileFromHLSL_MEM(const wchar_t* 
 
 		if (saveSource)
 		{
-			d912pxy_s.vfs.WriteFileH(mUID, imem, size, PXY_VFS_BID_SHADER_SOURCES);
+			d912pxy_s.vfs.WriteFile(d912pxy_vfs_path(mUID, d912pxy_vfs_bid::shader_sources), d912pxy_mem_block::use(imem, size));			
 		}
 
 		return ret2;
@@ -237,22 +237,21 @@ d912pxy_shader_code d912pxy_shader_replacer::CompileFromHLSL_MEM(const wchar_t* 
 }
 
 d912pxy_shader_code d912pxy_shader_replacer::LoadFromCSO(const char* bfolder)
-{
+{		
+	d912pxy_mem_block mem = d912pxy_s.vfs.ReadFile(d912pxy_vfs_path(mUID, d912pxy_vfs_bid::cso));
+
 	d912pxy_shader_code ret;
-
-	ret.code = 0;
-	ret.sz = 0;
 	ret.blob = nullptr;
+	ret.code = mem.ptr();
+	ret.sz = mem.size();
 		
-	ret.code = d912pxy_s.vfs.LoadFileH(mUID, (UINT*)&ret.sz, PXY_VFS_BID_CSO);
-
 	return ret;
 
 }
 
 void d912pxy_shader_replacer::SaveCSO(d912pxy_shader_code code, const char * bfolder)
 {
-	d912pxy_s.vfs.WriteFileH(mUID, code.code, (UINT32)code.sz, PXY_VFS_BID_CSO);
+	d912pxy_s.vfs.WriteFile(d912pxy_vfs_path(mUID, d912pxy_vfs_bid::cso), d912pxy_mem_block::use(code.code, code.sz));	
 }
 
 d912pxy_hlsl_generator_memout* d912pxy_shader_replacer::GenerateHLSL(const wchar_t * bfolder)
@@ -269,12 +268,17 @@ d912pxy_hlsl_generator_memout* d912pxy_shader_replacer::GenerateHLSL(const wchar
 	}
 	catch (...)
 	{		
+		ret = 0;
+	}
+
+	if (!ret)
+	{
 		wsprintf(replFn, L"%s/%08lX%08lX.dxbc", bfolder, (UINT32)(mUID >> 32), (UINT32)(mUID & 0xFFFFFFFF));
 		LOG_ERR_DTDM("hlsl generator failed, dumping original bytecode to %s", replFn);
 
 		FILE* dumpFile = _wfopen(replFn, L"wb+");
 		if (dumpFile)
-		{			
+		{
 			fwrite(oCode, 4, oLen, dumpFile);
 			fclose(dumpFile);
 		}
@@ -285,6 +289,41 @@ d912pxy_hlsl_generator_memout* d912pxy_shader_replacer::GenerateHLSL(const wchar
 
 	delete gen;
 
+	return ret;
+}
+
+d912pxy_mem_block d912pxy_shader_replacer::GetHLSL()
+{
+	wchar_t replFn[1024];
+
+	wsprintf(replFn, L"%s/%08lX%08lX.hlsl", d912pxy_helper::GetFilePath(FP_SHADER_DB_HLSL_CUSTOM_DIR)->w, (int)(mUID >> 32), (int)(mUID & 0xFFFFFFFF));
+
+	FILE* customHLSL = _wfopen(replFn, L"rb+");
+	if (customHLSL)
+	{
+		fseek(customHLSL, 0, SEEK_END);
+		int fsz = ftell(customHLSL);
+		fseek(customHLSL, 0, SEEK_SET);
+		
+		if (!fsz)
+			fclose(customHLSL);
+		else
+		{
+			auto ret = d912pxy_mem_block::alloc(fsz);
+			fread(ret.ptr(), 1, fsz, customHLSL);
+			fclose(customHLSL);
+			return ret;
+		}
+	}
+
+	d912pxy_hlsl_generator_memout* genRet = GenerateHLSL(d912pxy_helper::GetFilePath(FP_SHADER_DB_HLSL_DIR)->w);
+	if (!genRet)
+		return d912pxy_mem_block::null();
+
+	auto ret = d912pxy_mem_block::from(genRet->data, genRet->size);
+	PXY_FREE(genRet);
+
+	d912pxy_s.vfs.WriteFile(d912pxy_vfs_path(mUID, d912pxy_vfs_bid::shader_sources), ret);
 	return ret;
 }
 

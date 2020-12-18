@@ -30,11 +30,20 @@ SOFTWARE.
 
 UINT32 d912pxy_vstream::threadedCtor = 0;
 
-d912pxy_vstream::d912pxy_vstream(UINT Length, DWORD Usage, DWORD fmt, DWORD isIB) : d912pxy_resource(isIB ? RTID_IBUF : RTID_VBUF, PXY_COM_OBJ_VSTREAM, isIB ? L"vstream i" : L"vstream v")
-{		
-	lockDepth = 0;
-	ul = NULL;	
+void d912pxy_vstream::LoadFromBlock(const d912pxy::MemoryArea& mem)
+{
+	void* dst = nullptr;
+	Lock(0, mem.getSize(), &dst, 0);
+	memcpy(dst, mem.getPtr(), mem.getSize());
+	Unlock();
+}
 
+d912pxy_vstream::d912pxy_vstream(UINT Length, DWORD Usage, DWORD fmt, DWORD isIB)
+	: d912pxy_resource(isIB ? RTID_IBUF : RTID_VBUF, PXY_COM_OBJ_VSTREAM, isIB ? L"vstream i" : L"vstream v")
+	, lockDepth(0)
+	, ul(NULL)
+	, ul_offset(0)
+{			
 	PXY_MALLOC_GPU_HOST_COPY(data, Length, void*);
 
 	dx9desc.FVF = 0;
@@ -78,6 +87,8 @@ D912PXY_METHOD_IMPL_NC(Lock)(THIS_ UINT OffsetToLock, UINT SizeToLock, void** pp
 	d912pxy_vstream_lock_data* linfo = &lockInfo[lockDepth];
 	++lockDepth;
 
+	LOG_ASSERT(PXY_INNER_MAX_LOCK_DEPTH > lockDepth, "vstream lock depth too big");
+
 	linfo->dst = this;
 
 	if (!SizeToLock)
@@ -103,7 +114,7 @@ D912PXY_METHOD_IMPL_NC(Unlock)(THIS)
 	--lockDepth;
 
 	if (lockInfo[lockDepth].size)
-		d912pxy_s.thread.bufld.IssueUpload(lockInfo[lockDepth]);	
+		d912pxy_s.thread.bufld.IssueUpload(lockInfo[lockDepth]);
 	
 	return D3D_OK;
 }

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -32,17 +32,24 @@ SOFTWARE.
 #define D3DRS_D912PXY_GPU_WRITE (D3DRENDERSTATETYPE)223
 #define D3DRS_D912PXY_DRAW (D3DRENDERSTATETYPE)224
 #define D3DRS_D912PXY_SAMPLER_ID (D3DRENDERSTATETYPE)225
+#define D3DRS_D912PXY_CUSTOM_BATCH_DATA (D3DRENDERSTATETYPE)226
 
 #define D3DDECLMETHOD_PER_VERTEX_CONSTANT 8
 #define D3DDECLMETHOD_PER_INSTANCE_CONSTANT 16
 #define D3DUSAGE_D912PXY_FORCE_RT 0x0F000000L
 
-#define D912PXY_ENCODE_GPU_WRITE_DSC(sz, offset) ((sz & 0xFFFF) | ((offset & 0xFFFF) << 16))
+#define D912PXY_ENCODE_GPU_WRITE_DSC(sz, offset) (((sz) & 0xFFFF) | (((offset) & 0xFFFF) << 16))
 
 #define D912PXY_GPU_WRITE_OFFSET_TEXBIND 0
 #define D912PXY_GPU_WRITE_OFFSET_SAMPLER 8 
 #define D912PXY_GPU_WRITE_OFFSET_VS_VARS 16
-#define D912PXY_GPU_WRITE_OFFSET_PS_VARS 16 + 256
+#define D912PXY_GPU_WRITE_OFFSET_PS_VARS (16 + 256)
+
+struct d912pxy_custom_batch_data
+{
+	IDirect3DVertexBuffer9* buffer;
+	int index;
+};
 
 //configuration switches =======================
 
@@ -74,18 +81,18 @@ SOFTWARE.
 #define PXY_INNER_MAX_SHADER_SAMPLERS 32
 #define PXY_INNER_MAX_SHADER_SAMPLERS_SZ 1664
 #define PXY_INNER_MAX_SHADER_CONSTS_IDX 256
-#define PXY_INNER_MAX_SHADER_CONSTS 256*4
+#define PXY_INNER_MAX_SHADER_CONSTS (256*4)
 #define PXY_INNER_EXTRA_SHADER_CONST_CLIP_P0 256
 #define PXY_INNER_EXTRA_SHADER_CONST_HALFPIXEL_FIX 257
 #define PXY_INNER_EXTRA_SHADER_CONST_BASE_IDX 260
 #define PXY_INNER_EXTRA_SHADER_CONST_CLEAR_COLOR 260
 #define PXY_INNER_EXTRA_SHADER_CONST_CLEAR_RECT 261
 #define PXY_INNER_EXTRA_SHADER_CONST_CLEAR_ZWH 262
-#define PXY_INNER_EXTRA_SHADER_CONST_UNUSED 263
+#define PXY_INNER_EXTRA_SHADER_CONST_TAA_PARAMS 263
+#define PXY_INNER_EXTRA_SHADER_CONST_UNUSED 264
 #define PXY_INNER_MAX_VBUF_STREAMS 10
-#define PXY_INNER_MAX_IFRAME_CLEANUPS 1024*1024
+#define PXY_INNER_MAX_IFRAME_CLEANUPS (1024*1024)
 #define PXY_INNER_MAX_CLEANUPS_PER_SYNC 128
-#define PXY_INNER_MAX_IFRAME_BATCH_COUNT 1024*8
 #define PXY_INNER_MAX_IFRAME_PSO_CACHES 4096
 #define PXY_INNER_MAX_CACHE_NODES_SAMPLERS 4096
 #define PXY_INNER_MAX_TEXSTATE_CACHE_NODES 0xFFFFF
@@ -162,21 +169,6 @@ SOFTWARE.
 
 #endif
 
-
-//shader profile defs =======================
-
-#define PXY_INNER_SHDR_BUG_PCF_SAMPLER 0
-#define PXY_INNER_SHDR_BUG_ALPHA_TEST 1
-#define PXY_INNER_SHDR_BUG_SRGB_READ 2
-#define PXY_INNER_SHDR_BUG_SRGB_WRITE 3
-#define PXY_INNER_SHDR_BUG_CLIPPLANE0 4
-#define PXY_INNER_SHDR_BUG_UINT_NORMALS 5
-#define PXY_INNER_SHDR_BUG_UINT_TANGENTS 6
-#define PXY_INNER_SHDR_BUG_RESERVED2 7
-#define PXY_INNER_SHDR_BUG_RESERVED3 8
-#define PXY_INNER_SHDR_BUG_COUNT 9
-#define PXY_INNER_SHDR_BUG_FILE_SIZE PXY_INNER_SHDR_BUG_COUNT * 4
-
 //metrics macros =======================
 
 #ifdef ENABLE_METRICS
@@ -216,13 +208,13 @@ SOFTWARE.
 		#define LOG_DBG_DTDM2(fmt, ...) ;//(d912pxy_s.log.text._PXY_LOG_DEBUG(LGC_DEFAULT, TM(fmt), __VA_ARGS__))
 		#define LOG_DBG_DTDM3(fmt, ...) (d912pxy_s.log.text._PXY_LOG_DEBUG(LGC_DEFAULT, TM(fmt), __VA_ARGS__))
 		#define LOG_DX_SET_NAME(obj, val) obj->SetName(val)
-        #define LOG_ASSERT(cnd, text) if (!cnd) LOG_ERR_THROW2(-1, text)
+        #define LOG_ASSERT(cnd, text) if (!(cnd)) LOG_ERR_THROW2(-1, text)
 	#else 
 		#define LOG_DBG_DTDM(fmt, ...) (d912pxy_s.log.text._PXY_LOG_DEBUG(LGC_DEFAULT, TM(fmt), __VA_ARGS__))
 		#define LOG_DBG_DTDM2(fmt, ...) (d912pxy_s.log.text._PXY_LOG_DEBUG(LGC_DEFAULT, TM(fmt), __VA_ARGS__))
 		#define LOG_DBG_DTDM3(fmt, ...) (d912pxy_s.log.text._PXY_LOG_DEBUG(LGC_DEFAULT, TM(fmt), __VA_ARGS__))
 		#define LOG_DX_SET_NAME(obj, val) obj->SetName(val)
-		#define LOG_ASSERT(cnd, text) if (!cnd) LOG_ERR_THROW2(-1, text)
+		#define LOG_ASSERT(cnd, text) if (!(cnd)) LOG_ERR_THROW2(-1, text)
         #define PER_DRAW_FLUSH 
 	#endif
 #else
@@ -230,7 +222,7 @@ SOFTWARE.
 	#define LOG_DBG_DTDM2(fmt, ...) ;
 	#define LOG_DBG_DTDM3(fmt, ...) ;
 	#define LOG_DX_SET_NAME(obj, val) 
-	#define LOG_ASSERT(cnd, text) cnd
+	#define LOG_ASSERT(cnd, text) (cnd)
 #endif
 
 #define LOG_ERR_THROW(hr) LOG_ERR_THROW2(hr, hr)
@@ -265,12 +257,23 @@ typedef enum d912pxy_file_path_id {
 	FP_CONFIG,
 	FP_W7_12ON7,
 	FP_VFS_PREFIX,
+	FP_IMGUI_INI,
+	FP_IMGUI_LOG,
+	FP_SPAIR_INFO_BASE_PATH,
+	FP_IFRAME_MODS_BASE_PATH,
+	FP_PROXY_DATA_PATH,
 	FP_NO_PATH
 } d912pxy_file_path_id;
 
-typedef struct d912pxy_file_path {
-	const char* s;
-	const wchar_t* w;
+typedef union d912pxy_file_path {
+	struct {
+		const char* s;
+		const wchar_t* w;
+	};
+	struct {
+		char* ds;
+		wchar_t* dw;
+	};
 } d912pxy_file_path;
 
 #define FP_DEF(a) {a, L##a }
@@ -294,6 +297,11 @@ static const d912pxy_file_path d912pxy_file_paths_default[] = {
 	FP_DEF("./d912pxy/config.ini"),
 	FP_DEF("./d912pxy/12on7/"),
 	FP_DEF("."),
+	FP_DEF("./d912pxy/imgui.ini"),
+	FP_DEF("./d912pxy/imgui.log"),
+	FP_DEF("./d912pxy/shaders/pairs/"),
+	FP_DEF("./d912pxy/shaders/iframe_mods/"),
+	FP_DEF("./d912pxy/"),
 	FP_DEF("")
 };
 
@@ -316,6 +324,38 @@ static const d912pxy_file_path d912pxy_file_paths_addon[] = {
 	FP_DEF("./addons/d912pxy/config.ini"),
 	FP_DEF("./addons/d912pxy/12on7/"),	
 	FP_DEF("./addons/"),
+	FP_DEF("./addons/d912pxy/imgui.ini"),
+	FP_DEF("./addons/d912pxy/imgui.log"),
+	FP_DEF("./addons/d912pxy/shaders/pairs/"),
+	FP_DEF("./addons/d912pxy/shaders/iframe_mods/"),
+	FP_DEF("./addons/d912pxy/"),
+	FP_DEF("")
+};
+
+static const d912pxy_file_path d912pxy_file_paths_abs_rh[] = {
+	FP_DEF("d912pxy/shaders/cs"),
+	FP_DEF("cs/cso"),
+	FP_DEF("d912pxy/shaders/hlsl"),
+	FP_DEF("d912pxy/pck/pid.lock"),
+	FP_DEF("vfs_archive"),
+	FP_DEF("addons/d912pxy/shaders/hlsl/custom"),
+	FP_DEF("shaders/cso"),
+	FP_DEF("shaders/bugs"),
+	FP_DEF("d912pxy/crash"),
+	FP_DEF("d912pxy/log.txt"),
+	FP_DEF("d912pxy/log.1.txt"),
+	FP_DEF("d912pxy/dx12_perf_graph.html"),
+	FP_DEF("d912pxy/dx9_perf_graph.html"),
+	FP_DEF("d912pxy/dx12_perf_graph.png"),
+	FP_DEF("d912pxy/dx9_perf_graph.png"),
+	FP_DEF("d912pxy/config.ini"),
+	FP_DEF("d912pxy/12on7/"),
+	FP_DEF(""),
+	FP_DEF("d912pxy/imgui.ini"),
+	FP_DEF("d912pxy/imgui.log"),
+	FP_DEF("d912pxy/shaders/pairs/"),
+	FP_DEF("d912pxy/shaders/iframe_mods/"),
+	FP_DEF("d912pxy/"),
 	FP_DEF("")
 };
 
@@ -350,7 +390,7 @@ class d912pxy_surface_layer;
 class d912pxy_texture_loader;
 class d912pxy_buffer_loader;
 class d912pxy_pso_cache;
-class d912pxy_batch;
+class d912pxy_batch_buffer;
 class d912pxy_pso_cache_item;
 class d912pxy_vfs;
 class d912pxy_metrics;
@@ -358,7 +398,7 @@ class d912pxy_config;
 class d912pxy_log;
 class d912pxy_mem_mgr;
 class d912pxy_StackWalker;
-struct d912pxy_trimmed_dx12_pso;
+class d912pxy_trimmed_pso_desc;
 class d912pxy_query_occlusion;
 class d912pxy_com_mgr;
 class d912pxy_comhandler;
@@ -367,7 +407,10 @@ class d912pxy_ctexture;
 class d912pxy_vtexture;
 class d912pxy_base_texture;
 class d912pxy_texture;
+class d912pxy_extras;
+class d912pxy_shader;
 struct d912pxy_com_object;
+enum d912pxy_replay_item_type;
 
 
 typedef struct d912pxy_device_streamsrc {

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -37,13 +37,16 @@ d912pxy_surface * d912pxy_surface::CorrectLayerRepresent(d912pxy_com_object * ob
 		return &(obj->surface);
 }
 
-d912pxy_surface::d912pxy_surface(UINT Width, UINT Height, D3DFORMAT Format, DWORD Usage, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Lockable, UINT* levels, UINT arrSz, UINT32* srvFeedback) : d912pxy_resource(RTID_SURFACE, PXY_COM_OBJ_SURFACE, L"surface")
+d912pxy_surface::d912pxy_surface(UINT Width, UINT Height, D3DFORMAT Format, DWORD Usage, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Lockable, UINT* levels, UINT arrSz, UINT32* srvFeedback) 
+	: d912pxy_resource(RTID_SURFACE, PXY_COM_OBJ_SURFACE, L"surface")
+	, isPooled(0)
+	, ulMarked(0)
+	, ul(NULL)
+	, layers(NULL)
+	, dheapId(-1)
+	, dheapIdFeedback(srvFeedback)
 {
-	isPooled = 0;
-	ul = NULL;
-	layers = NULL;
-	dheapId = -1;
-	dheapIdFeedback = srvFeedback;
+	stateCache = D3D12_RESOURCE_STATE_COMMON;
 	dHeap = d912pxy_s.dev.GetDHeap(PXY_INNER_HEAP_SRV);	
 
 	surf_dx9dsc.Format = Format;
@@ -56,13 +59,10 @@ d912pxy_surface::d912pxy_surface(UINT Width, UINT Height, D3DFORMAT Format, DWOR
 	surf_dx9dsc.Usage = Usage;
 	
 	m_fmt = d912pxy_helper::DXGIFormatFromDX9FMT(Format);
-	LOG_DBG_DTDM("fmt %u => %u", Format, m_fmt);
-
-	stateCache = D3D12_RESOURCE_STATE_COMMON;
+	LOG_DBG_DTDM("fmt %u => %u", Format, m_fmt);	
 
 	if (Format == D3DFMT_NULL)//FOURCC NULL DX9 no rendertarget trick
 	{
-
 		PXY_MALLOC(subresFootprints, sizeof(D3D12_PLACED_SUBRESOURCE_FOOTPRINT) * 1, D3D12_PLACED_SUBRESOURCE_FOOTPRINT*);
 
 		PXY_MALLOC(ul, sizeof(d912pxy_surface_ul), d912pxy_surface_ul*);
@@ -127,7 +127,6 @@ d912pxy_surface::d912pxy_surface(UINT Width, UINT Height, D3DFORMAT Format, DWOR
 		AllocateLayers();
 	} 
 	else {
-
 		if (!threadedCtor || (dheapId == 0))
 			dheapId = AllocateSRV(m_res);
 		else
@@ -205,13 +204,6 @@ D912PXY_METHOD_IMPL_NC(LockRect)(THIS_ D3DLOCKED_RECT* pLockedRect, CONST RECT* 
 D912PXY_METHOD_IMPL_NC(UnlockRect)(THIS)
 { 
 	return GetLayer(0, 0)->UnlockRect();
-}
-
-D912PXY_METHOD_IMPL_NC_(ULONG, Release_Surface)(THIS)
-{
-	ULONG ret = Release();
-
-	return ret;
 }
 
 #undef D912PXY_METHOD_IMPL_CN
@@ -337,7 +329,7 @@ void d912pxy_surface::DelayedLoad(void* mem, UINT lv)
 		return;
 	}
 
-	UINT blockHeight = FixBlockHeight(lv);
+	UINT64 blockHeight = FixBlockHeight(lv);
 
 	UINT copyNeeded = 0;
 
@@ -345,8 +337,7 @@ void d912pxy_surface::DelayedLoad(void* mem, UINT lv)
 	{
 		UINT64 ul_memory_space = d912pxy_helper::AlignValueByPow2(subresFootprints[lv].Footprint.RowPitch*blockHeight, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
 
-		ul[lv].item = d912pxy_s.thread.texld.GetUploadMem(
-			(UINT32)ul_memory_space);
+		ul[lv].item = d912pxy_s.thread.texld.GetUploadMem((UINT32)ul_memory_space);
 		ul[lv].item->AddRef();
 		ul[lv].offset = ul[lv].item->GetCurrentOffset();
 		ul[lv].item->AddSpaceUsed(ul_memory_space);
@@ -370,8 +361,7 @@ void d912pxy_surface::DelayedLoad(void* mem, UINT lv)
 	if (!m_res)
 		ConstructResource();
 
-	GetCopyableFootprints(lv, &srcR.PlacedFootprint);
-
+	srcR.PlacedFootprint = subresFootprints[lv];
 	srcR.PlacedFootprint.Offset = ul[lv].offset;
 
 	ul_obj->Reconstruct(
@@ -524,7 +514,8 @@ void d912pxy_surface::CopySurfaceDataToCPU()
 	D3D12_TEXTURE_COPY_LOCATION dstR = { readbackBuffer->GetD12Obj(), D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, 0 };
 
 	UINT64 activeSize;
-	d912pxy_s.dx12.dev->GetCopyableFootprints(&m_res->GetDesc(), 0, 1, 0, &dstR.PlacedFootprint, 0, 0, &activeSize);
+	D3D12_RESOURCE_DESC rDesc = m_res->GetDesc();
+	d912pxy_s.dx12.dev->GetCopyableFootprints(&rDesc, 0, 1, 0, &dstR.PlacedFootprint, 0, 0, &activeSize);
 
 	D3D12_TEXTURE_COPY_LOCATION srcR = { m_res, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, 0 };
 
@@ -694,6 +685,17 @@ void d912pxy_surface::FreeObjAndSlot()
 {
 	if (m_res)
 	{
+#ifdef _DEBUG
+		if (dheapId > 0)
+		{
+			for (int i = 0; i != 31; ++i)
+				if (d912pxy_s.render.state.tex.GetTexStage(i) == dheapId)
+				{
+					LOG_ERR_DTDM("dheapId %u is active in tex stage %u at deletion time", dheapId, i);
+				}
+		}
+#endif
+
 		m_res->Release();
 		m_res = NULL;
 
@@ -759,7 +761,7 @@ UINT d912pxy_surface::GetSRVHeapIdRTDS()
 		dheapId = AllocateSRV(m_res);
 
 	//megai2: doin no transit here allows us to use surface as RTV and SRV in one time, but some drivers handle this bad
-	if (d912pxy_s.render.replay.StateTransit(this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE))
+	if (d912pxy_s.render.replay.DoBarrier(this, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE))
 	{
 		d912pxy_s.render.iframe.NoteBindedSurfaceTransit(this, (descCache.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) == 0);
 	}

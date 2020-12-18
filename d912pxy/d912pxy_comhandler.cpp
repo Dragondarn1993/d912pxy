@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -24,16 +24,18 @@ SOFTWARE.
 */
 #include "stdafx.h"
 
-d912pxy_comhandler::d912pxy_comhandler(d912pxy_com_obj_typeid tid, const wchar_t* moduleText) : d912pxy_noncom(moduleText)
+d912pxy_comhandler::d912pxy_comhandler(d912pxy_com_obj_typeid tid, const wchar_t* moduleText)
+	: d912pxy_noncom(moduleText)
+	, refc(1)
+	, timestamp(0)
+	, thrdRefc(0)
+	, thrdRefcFlag(0)
+	, beingWatched(0)
+	, persistentlyPooled(0)
+	, objType(tid)
 {
-	objType = tid;
-	refc = 1;
-	thrdRefc = 0;
-	thrdRefcFlag = 0;
-	beingWatched = 0;
 	poolSync.LockedSet(1);
-	persistentlyPooled = 0;
-	comBase = (d912pxy_com_object*)((intptr_t)this - 8);
+	comBase = (d912pxy_com_object*)((intptr_t)this - sizeof(void*));
 }
 
 d912pxy_comhandler::d912pxy_comhandler()
@@ -55,7 +57,7 @@ void d912pxy_comhandler::Init(d912pxy_com_obj_typeid tid, const wchar_t * module
 	poolSync.Init();
 	poolSync.LockedSet(1);
 	NonCom_Init(moduleText);
-	comBase = (d912pxy_com_object*)((intptr_t)this - 8);
+	comBase = (d912pxy_com_object*)((intptr_t)this - sizeof(void*));
 }
 
 #define API_OVERHEAD_TRACK_LOCAL_ID_DEFINE PXY_METRICS_API_OVERHEAD_COM
@@ -63,7 +65,8 @@ void d912pxy_comhandler::Init(d912pxy_com_obj_typeid tid, const wchar_t * module
 HRESULT d912pxy_comhandler::QueryInterface(REFIID riid, void ** ppvObj)
 {
 	LOG_DBG_DTDM("::CQI");
-	*ppvObj = this;
+	*ppvObj = comBase;
+	AddRef();
 	return NOERROR;
 }
 
@@ -71,12 +74,12 @@ ULONG d912pxy_comhandler::AddRef()
 {
 	LOG_DBG_DTDM("::CAR");
 
-	return InterlockedAdd(&refc, 1);
+	return ++refc;
 }
 
 ULONG d912pxy_comhandler::Release()
 {
-	LONG decR = InterlockedAdd(&refc, -1);
+	ULONG decR = --refc;
 
 	if (decR == 0)
 	{
@@ -100,7 +103,7 @@ ULONG d912pxy_comhandler::Release()
 
 UINT d912pxy_comhandler::FinalReleaseTest()
 {
-	if (InterlockedAdd(&thrdRefc, 0))
+	if (thrdRefc)
 	{
 		d912pxy_s.dev.IFrameCleanupEnqeue(this);
 		return 2;
@@ -114,16 +117,16 @@ UINT d912pxy_comhandler::FinalReleaseTest()
 
 UINT d912pxy_comhandler::FinalRelease()
 {
-	if (InterlockedAdd(&thrdRefc, 0))
+	if (thrdRefc)
 	{
 		d912pxy_s.dev.IFrameCleanupEnqeue(this);
 		return 3;
 	}
 	else {		
 
-		if (InterlockedAdd(&thrdRefcFlag, 0))
+		if (thrdRefcFlag)
 		{
-			InterlockedAdd(&thrdRefcFlag, -1);
+			--thrdRefcFlag;
 			d912pxy_s.dev.IFrameCleanupEnqeue(this);
 			return 2;
 		}
@@ -146,14 +149,14 @@ void d912pxy_comhandler::ThreadRef(INT ic)
 	//megai2: we must be sure that object referenced by some internal threads/logic are not deleted before gpu processed current submitted command list
 	//example: interframe flush, currently used vs objects will be holded on, but can be deleted after flushed cl are executed before next cl that have reference to that objects are executed
 	//			making GPU crash possible	
-	if (!InterlockedAdd(&refc, 0) && !InterlockedAdd(&thrdRefc, 0))
+	if (!refc && !thrdRefc)
 		//this will make object persist one cleanup cycle
-		InterlockedAdd(&thrdRefcFlag, 1);
+		++thrdRefcFlag;
 
 	if (ic > 0)
-		InterlockedAdd(&thrdRefc, 1);
+		++thrdRefc;
 	else
-		InterlockedAdd(&thrdRefc, -1);
+		--thrdRefc;
 }
 
 void d912pxy_comhandler::NoteDeletion(UINT32 time)
@@ -208,7 +211,8 @@ void d912pxy_comhandler::PooledActionExit()
 
 int d912pxy_comhandler::Watching(LONG v)
 {
-	return InterlockedAdd(&beingWatched, v);
+	beingWatched += v;
+	return beingWatched;
 }
 
 void d912pxy_comhandler::DeAllocateBase()
@@ -261,7 +265,7 @@ void d912pxy_comhandler::DeAllocateBase()
 		d912pxy_s.com.DeAllocateComObj(comBase);
 		break;
 	case PXY_COM_OBJ_PSO_ITEM:
-		dtor_call(d912pxy_pso_cache_item);
+		dtor_call(d912pxy_pso_item);
 		d912pxy_s.com.DeAllocateComObj(comBase);
 		break;
 	case PXY_COM_OBJ_NOVTABLE:
@@ -273,8 +277,8 @@ void d912pxy_comhandler::DeAllocateBase()
 	case PXY_COM_OBJ_STATIC:
 		;
 		break;
-	case PXY_COM_OBJ_RESOURCE:
-		dtor_call(d912pxy_resource);		
+	case PXY_COM_OBJ_RESOURCE:				
+		delete ((d912pxy_resource*)this);
 		break;
 	default:
 		LOG_ERR_THROW2(-1, "wrong com object typeid");

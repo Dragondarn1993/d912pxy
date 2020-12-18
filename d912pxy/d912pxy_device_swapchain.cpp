@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -49,6 +49,7 @@ HRESULT d912pxy_device::GetSwapChain(UINT iSwapChain, IDirect3DSwapChain9** pSwa
 		return D3DERR_INVALIDCALL;
 
 	*pSwapChain = PXY_COM_CAST_(IDirect3DSwapChain9, swapchains[iSwapChain]);
+	(*pSwapChain)->AddRef();
 
 	return D3D_OK; 
 }
@@ -75,6 +76,8 @@ HRESULT d912pxy_device::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters)
 	d912pxy_s.render.iframe.Start();
 
 	swapOpLock.Release();
+
+	d912pxy_s.thread.cleanup.OnReset();
 		
 	return ret; 
 }
@@ -95,10 +98,12 @@ void d912pxy_device::InnerPresentFinish()
 {
 	FRAME_METRIC_PRESENT(1)
 	
-
 	d912pxy_s.render.iframe.Start();
 
 	swapOpLock.Release();
+	
+	if (swapchains[0])
+		swapchains[0]->WaitForNewFrame();
 
 	LOG_DBG_DTDM("Present finished");	
 }
@@ -133,9 +138,32 @@ HRESULT d912pxy_device::Present_PG(const RECT * pSourceRect, const RECT * pDestR
 
 #ifdef ENABLE_METRICS
 	d912pxy_s.log.metrics.FlushIFrameValues();
-#endif s
+#endif
 
 	InnerPresentFinish();
+
+	return ret;
+}
+
+HRESULT d912pxy_device::Present_Extra(const RECT * pSourceRect, const RECT * pDestRect, HWND hDestWindowOverride, const RGNDATA * pDirtyRegion)
+{
+#ifdef ENABLE_METRICS
+	d912pxy_s.log.metrics.TrackDrawCount(d912pxy_s.render.batch.GetBatchCount());
+#endif 
+
+	d912pxy_s.extras.OnPresent();
+
+	perfGraph->RecordPresent(d912pxy_s.render.batch.GetBatchCount());
+
+	HRESULT ret = InnerPresentExecute();
+
+#ifdef ENABLE_METRICS
+	d912pxy_s.log.metrics.FlushIFrameValues();
+#endif
+
+	InnerPresentFinish();
+
+	d912pxy_s.extras.WaitForTargetFrameTime();
 
 	return ret;
 }

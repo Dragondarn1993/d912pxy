@@ -25,6 +25,8 @@ SOFTWARE.
 #include "stdafx.h"
 #include "d912pxy_mem_va_table.h"
 
+#if _WIN64
+
 d912pxy_mem_va_table::d912pxy_mem_va_table() : d912pxy_noncom()
 {
 }
@@ -235,3 +237,46 @@ intptr_t d912pxy_mem_va_table::GetBaseAdr()
 {
 	return baseAdr;
 }
+
+#else
+
+
+d912pxy_mem_va_table::d912pxy_mem_va_table() : d912pxy_noncom()
+{
+}
+
+d912pxy_mem_va_table::~d912pxy_mem_va_table()
+{
+
+}
+
+void d912pxy_mem_va_table::Init(UINT64* objSizes, UINT64 allocBitSize, UINT64 entryCount)
+{
+	NonCom_Init(L"mem_va_table_stub");
+
+	for (int i = 0; i != entryCount; ++i)
+	{
+		table[i].itemSize = objSizes[i];
+	}
+}
+
+void d912pxy_mem_va_table::DeInit()
+{
+}
+
+void* d912pxy_mem_va_table::AllocateObjPow2(UINT64 size)
+{	
+	return calloc(1, size);
+}
+
+void* d912pxy_mem_va_table::AllocateObj(UINT64 type)
+{
+	return calloc(1, table[type].itemSize);
+}
+
+void d912pxy_mem_va_table::DeAllocateObj(void* obj)
+{
+	free(obj);
+}
+
+#endif

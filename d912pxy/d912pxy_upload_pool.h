@@ -52,7 +52,7 @@ public:
 
 	intptr_t GetCurrentOffset() { return usedSpace; };
 
-	void AddSpaceUsed(UINT64 amount) { usedSpace += amount; };
+	void AddSpaceUsed(intptr_t amount) { usedSpace += amount; };
 	   
 private:	
 	intptr_t DPtr();
@@ -73,7 +73,7 @@ private:
 //this will allow creating buffers with size up to 256mB
 #define PXY_INNDER_UPLOAD_POOL_BITIGNORE 20
 #define PXY_INNDER_UPLOAD_POOL_BITLIMIT 28
-#define PXY_INNDER_UPLOAD_POOL_BITCNT PXY_INNDER_UPLOAD_POOL_BITLIMIT - PXY_INNDER_UPLOAD_POOL_BITIGNORE
+#define PXY_INNDER_UPLOAD_POOL_BITCNT (PXY_INNDER_UPLOAD_POOL_BITLIMIT - PXY_INNDER_UPLOAD_POOL_BITIGNORE)
 
 
 class d912pxy_upload_pool : public d912pxy_pool_memcat<d912pxy_upload_item*, d912pxy_upload_pool*>
@@ -83,6 +83,7 @@ public:
 	~d912pxy_upload_pool();
 
 	void Init();
+	void UnInit();
 
 	d912pxy_upload_item* GetUploadObject(UINT size);
 	ID3D12Resource* MakeUploadBuffer(UINT maxSize);

@@ -28,7 +28,10 @@ SOFTWARE.
 #pragma pack(push, 1)
 
 typedef struct d912pxy_device_texture_state {
-	UINT64 dirty;
+	UINT64 dirtyTexRefs;
+	d912pxy_basetexture* texRefs[PXY_INNER_MAX_TEXTURE_STAGES];
+
+	UINT64 dirty;	
 	UINT texHeapID[PXY_INNER_MAX_TEXTURE_STAGES];
 	UINT splHeapID[PXY_INNER_MAX_SHADER_SAMPLERS];
 } d912pxy_device_texture_state;
@@ -36,7 +39,7 @@ typedef struct d912pxy_device_texture_state {
 typedef struct d912pxy_trimmed_sampler_dsc {
 	UINT16 Dsc0;
 	UINT16 Dsc1;
-	UINT16 MipLODBias;
+	INT16 MipLODBias;
 	UINT16 MinLOD;	
 	//UINT32 borderColor;
 } d912pxy_trimmed_sampler_dsc;
@@ -50,8 +53,11 @@ public:
 	~d912pxy_texture_state();
 
 	void Init();
+	void UnInit();
 
-	void SetTexture(UINT stage, UINT srv);
+	void SetTextureSrvId(UINT stage, UINT srv);
+	void SetTexture(UINT stage, d912pxy_basetexture* texRef);
+	void ModStageByMask(UINT stage, UINT srv, UINT mask);
 	void ModStageBit(UINT stage, UINT bit, UINT set);
 	void ModSamplerTracked(UINT stage, D3DSAMPLERSTATETYPE state, DWORD value);
 	void ModSampler(UINT stage, D3DSAMPLERSTATETYPE state, DWORD value);
@@ -64,17 +70,32 @@ public:
 
 	d912pxy_device_texture_state* GetCurrent() { return &current; };
 
+	void ClearActiveTextures();
+
+	constexpr DWORD MakeDirtyFlagBit(const int stage, const bool sampler)
+	{
+		if (sampler)
+			return (1 << stage) << 8;
+		else
+			return 1 << (stage >> 2);
+	}
+
+	//this function is not thread safe
+	UINT LookupSamplerId(const d912pxy_trimmed_sampler_dsc& trimmedDsc);
+
 private:
 	UINT LookupSamplerId(UINT stage);
 
-	void UpdateFullSplDsc(UINT from);
+	void UpdateFullSplDsc(const d912pxy_trimmed_sampler_dsc& trimmedSpl);
 
 	UINT CreateNewSampler();
 
 	d912pxy_device_texture_state current;	
 
 	d912pxy_dheap* samplerHeap;	
-	d912pxy_memtree2* splLookup;
+
+	typedef d912pxy::Memtree<d912pxy_trimmed_sampler_dsc, uint32_t, d912pxy::Hash32> LookupTable;
+	LookupTable splLookup;
 
 	D3D12_SAMPLER_DESC splDsc;
 	d912pxy_trimmed_sampler_dsc trimmedSpl[PXY_INNER_MAX_TEXTURE_STAGES];

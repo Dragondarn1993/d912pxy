@@ -66,13 +66,19 @@ d912pxy_mem_mgr::d912pxy_mem_mgr() : d912pxy_noncom() {
 
 d912pxy_mem_mgr::~d912pxy_mem_mgr() {
 	
+}
+
+void d912pxy_mem_mgr::UnInit()
+{
 #ifdef _DEBUG
-	delete stkWlk;	
+	delete stkWlk;
 	LogLeaked();
 #endif
 
-/*	free(d912pxy_s(memMgr));
-	d912pxy_s(memMgr) = NULL;*/
+	d912pxy_noncom::UnInit();
+
+	/*	free(d912pxy_s(memMgr));
+		d912pxy_s(memMgr) = NULL;*/
 }
 
 UINT64 d912pxy_mem_mgr::GetPageSize()
@@ -185,10 +191,10 @@ void d912pxy_mem_mgr::inFree(void* block) {
 
 bool d912pxy_mem_mgr::pxy_malloc_dbg(void** cp, size_t sz, const char* file, const int line, const char* function) { // Calls pxy_malloc until it gets a success or fails after trying "tries" times.
 #ifdef _DEBUG
-	if (*cp != NULL) { // Were we passed a non null pointer to malloc? Possible memory leak condition.
+	/*if (*cp != NULL) { // Were we passed a non null pointer to malloc? Possible memory leak condition.
 		LOG_ERR_DTDM("A malloc was called with a possible valid pointer. Size requested: %u. %S %u %S", sz, file, line, function);
 		//pxy_free(*cp); // Let's free that current pointer to avoid a memory leak. // Nevermind, we can't assume just because it isn't null that we should free it... but we will log it.
-	}
+	}*/
 
 	sz += sizeof(d912pxy_dbg_mem_block);
 
@@ -215,7 +221,7 @@ bool d912pxy_mem_mgr::pxy_malloc_dbg(void** cp, size_t sz, const char* file, con
 	blkdsc->sz = sz;
 	blkdsc->trashCheck = 0xAAAAAAAA;
 
-	InterlockedAdd64(&memUsed, sz);
+	memUsed += sz;
 
 	*cp = (void*)((intptr_t)tempPointer + sizeof(d912pxy_dbg_mem_block));
 
@@ -271,7 +277,7 @@ bool d912pxy_mem_mgr::pxy_realloc_dbg(void** cp, size_t sz, const char* file, co
 
 	d912pxy_dbg_mem_block* blkdsc = (d912pxy_dbg_mem_block*)tempPointer;
 
-	InterlockedAdd64(&memUsed, sz - blkdsc->sz);
+	memUsed += sz - blkdsc->sz;
 
 	blkdsc->file = (char*)file;
 	blkdsc->function = (char*)function;
@@ -317,8 +323,7 @@ void d912pxy_mem_mgr::pxy_free_dbg(void** cp, const char* file, const int line, 
 		free(blkdsc->file);
 
 justFree:
-	if (this)
-		InterlockedAdd64(&memUsed, -((LONG64)blkdsc->sz));
+	memUsed -= (LONG64)blkdsc->sz;
 
 	inFree(origBlk);
 	*cp = NULL;	

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2019 megai2
+Copyright(c) 2019-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -644,6 +644,13 @@ D912PXY_METHOD_IMPL_(float, GetNPatchMode)(PXY_THIS)
 	D912PXY_ROUTE_IMPL_END
 }
 
+D912PXY_METHOD_IMPL(DrawPrimitive_Compat)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
+{
+	D912PXY_ROUTE_IMPL_START
+		D912PXY_ROUTE_IMPL_PREFIX DrawPrimitive_Compat(PrimitiveType, StartVertex, PrimitiveCount);
+	D912PXY_ROUTE_IMPL_END
+}
+
 D912PXY_METHOD_IMPL(DrawPrimitive)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, UINT StartVertex, UINT PrimitiveCount)
 {
 	D912PXY_ROUTE_IMPL_START
@@ -931,13 +938,6 @@ D912PXY_METHOD_IMPL(CreateQuery_Optimized)(PXY_THIS_ D3DQUERYTYPE Type, IDirect3
 	D912PXY_ROUTE_IMPL_END
 }
 
-D912PXY_METHOD_IMPL(DrawIndexedPrimitive_PS)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount)
-{
-	D912PXY_ROUTE_IMPL_START
-		D912PXY_ROUTE_IMPL_PREFIX DrawIndexedPrimitive_PS(PrimitiveType, BaseVertexIndex, MinVertexIndex, NumVertices, startIndex, primCount);
-	D912PXY_ROUTE_IMPL_END
-}
-
 D912PXY_METHOD_IMPL(DrawIndexedPrimitive_Compat)(PXY_THIS_ D3DPRIMITIVETYPE PrimitiveType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT startIndex, UINT primCount)
 {
 	D912PXY_ROUTE_IMPL_START
@@ -945,17 +945,17 @@ D912PXY_METHOD_IMPL(DrawIndexedPrimitive_Compat)(PXY_THIS_ D3DPRIMITIVETYPE Prim
 	D912PXY_ROUTE_IMPL_END
 }
 
-D912PXY_METHOD_IMPL(SetTexture_PS)(PXY_THIS_ DWORD Stage, IDirect3DBaseTexture9* pTexture)
-{
-	D912PXY_ROUTE_IMPL_START
-		D912PXY_ROUTE_IMPL_PREFIX SetTexture_PS(Stage, pTexture);
-	D912PXY_ROUTE_IMPL_END
-}
-
 D912PXY_METHOD_IMPL(Present_PG)(PXY_THIS_ CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion)
 {
 	D912PXY_ROUTE_IMPL_START
 		D912PXY_ROUTE_IMPL_PREFIX Present_PG(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+	D912PXY_ROUTE_IMPL_END
+}
+
+D912PXY_METHOD_IMPL(Present_Extra)(PXY_THIS_ CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion)
+{
+	D912PXY_ROUTE_IMPL_START
+		D912PXY_ROUTE_IMPL_PREFIX Present_Extra(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 	D912PXY_ROUTE_IMPL_END
 }
 
@@ -1106,13 +1106,6 @@ D912PXY_METHOD_IMPL(GetDesc)(PXY_THIS_ D3DVERTEXBUFFER_DESC *pDesc)
 #define D912PXY_METHOD_IMPL_CN d912pxy_surface
 
 #define D912PXY_ROUTE_IMPL_PREFIX return obj->surface.
-
-D912PXY_METHOD_IMPL_(ULONG, Release_Surface)(PXY_THIS)
-{
-	D912PXY_ROUTE_IMPL_START
-		D912PXY_ROUTE_IMPL_PREFIX Release_Surface();
-	D912PXY_ROUTE_IMPL_END
-}
 
 D912PXY_METHOD_IMPL(GetContainer)(PXY_THIS_ REFIID riid, void** ppContainer)
 {
@@ -1906,7 +1899,7 @@ void d912pxy_com_route_init_default()
 	//surface
 	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_UNK_QUERY_INTERFACE, &d912pxy_comhandler::com_QueryInterface);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_UNK_ADDREF, &d912pxy_comhandler::com_AddRef);
-	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_UNK_RELEASE, &d912pxy_surface::com_Release_Surface);
+	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_UNK_RELEASE, &d912pxy_comhandler::com_Release);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_RESOURCE_GETDEVICE, &d912pxy_noncom::com_GetDevice);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_RESOURCE_SETPRIVATEDATA, &d912pxy_resource::com_SetPrivateData);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SURFACE, PXY_COM_METHOD_RESOURCE_GETPRIVATEDATA, &d912pxy_resource::com_GetPrivateData);
@@ -2092,5 +2085,12 @@ void d912pxy_com_route_init_default()
 	d912pxy_com_route_set(PXY_COM_ROUTE_SBLOCK, PXY_COM_METHOD_SBLOCK_GETDEVICE, &d912pxy_noncom::com_GetDevice);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SBLOCK, PXY_COM_METHOD_SBLOCK_APPLY, &d912pxy_sblock::com_Apply);
 	d912pxy_com_route_set(PXY_COM_ROUTE_SBLOCK, PXY_COM_METHOD_SBLOCK_CAPTURE, &d912pxy_sblock::com_Capture);
+
+	//empty
+
+	d912pxy_com_route_set(PXY_COM_ROUTE_EMPTY, PXY_COM_METHOD_UNK_QUERY_INTERFACE, &d912pxy_comhandler::com_QueryInterface);
+	d912pxy_com_route_set(PXY_COM_ROUTE_EMPTY, PXY_COM_METHOD_UNK_ADDREF, &d912pxy_comhandler::com_AddRef);
+	d912pxy_com_route_set(PXY_COM_ROUTE_EMPTY, PXY_COM_METHOD_UNK_RELEASE, &d912pxy_comhandler::com_Release);
+	d912pxy_com_route_set(PXY_COM_ROUTE_EMPTY, PXY_COM_METHOD_EMPTY_NON_USED, nullptr);
 }
 

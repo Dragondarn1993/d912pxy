@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -35,6 +35,7 @@ public:
 	~d912pxy_shader_db();
 
 	void Init();
+	void UnInit();
 
 	d912pxy_shader_uid GetUID(DWORD* code, UINT32* len);		
 
@@ -43,11 +44,8 @@ public:
 	d912pxy_shader_pair* GetPair(d912pxy_shader* vs, d912pxy_shader* ps);
 	void DeletePair(d912pxy_shader_pair_hash_type ha);
 
-	UINT GetPrecompileFlag() { return precompileFlag; };
-
 private:
-	d912pxy_memtree2* shaderPairs;
-
-	UINT precompileFlag;
+	typedef d912pxy::Memtree<d912pxy_shader_pair_hash_type, d912pxy_shader_pair*, d912pxy::RawHash<d912pxy_shader_pair_hash_type>> ShaderPairStorage;
+	ShaderPairStorage shaderPairs;
 };
 

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -28,50 +28,19 @@ SOFTWARE.
 
 HRESULT d912pxy_device::SetTexture(DWORD Stage, IDirect3DBaseTexture9* pTexture)
 {
-	Stage = (Stage & 0xF) + 16 * ((Stage >> 4) != 0);
-
-	UINT64 srvId = 0;//megai2: make this to avoid memory reading. but we must be assured that mNullTextureSRV is equal to this constant!
-
-	if (pTexture)
-	{
-		srvId = PXY_COM_LOOKUP_(pTexture, basetex).GetSRVHeapId((intptr_t)pTexture & PXY_COM_OBJ_SIGNATURE_TEXTURE_RTDS);
-	}
-
-	d912pxy_s.render.tex.SetTexture(Stage, (UINT32)srvId);
+	d912pxy_s.render.state.tex.SetTexture(
+		convertTexStage(Stage),
+		PXY_COM_LOOKUP(pTexture, basetex)
+	);
 
 	return D3D_OK; 
-}
-
-HRESULT d912pxy_device::SetTexture_PS(DWORD Stage, IDirect3DBaseTexture9* pTexture)
-{
-	Stage = (Stage & 0xF) + 16 * ((Stage >> 4) != 0);
-
-	UINT64 srvId = 0;//megai2: make this to avoid memory reading. but we must be assured that mNullTextureSRV is equal to this constant!
-
-	if (pTexture)
-	{
-		srvId = (PXY_COM_LOOKUP(pTexture, basetex))->GetSRVHeapId((intptr_t)pTexture & PXY_COM_OBJ_SIGNATURE_TEXTURE_RTDS);
-	}
-
-	d912pxy_s.render.tex.SetTexture(Stage, (UINT32)srvId);
-
-	if (pTexture)
-	{
-		d912pxy_basetexture* btex = PXY_COM_LOOKUP(pTexture, basetex);
-
-		stageFormatsTrack[Stage] = btex->GetBaseSurface()->GetDX9DescAtLevel(0).Format;
-	}
-	else
-		stageFormatsTrack[Stage] = D3DFMT_UNKNOWN;
-
-	return D3D_OK;
 }
 
 HRESULT d912pxy_device::SetSamplerState(DWORD Sampler, D3DSAMPLERSTATETYPE Type, DWORD Value)
 { 	
 	Sampler = (Sampler & 0xF) + 16 * (Sampler >= D3DDMAPSAMPLER);
 
-	d912pxy_s.render.tex.ModSampler(Sampler, Type, Value);
+	d912pxy_s.render.state.tex.ModSampler(Sampler, Type, Value);
 	
 	return D3D_OK;
 }
@@ -80,7 +49,7 @@ HRESULT d912pxy_device::SetSamplerState_Tracked(DWORD Sampler, D3DSAMPLERSTATETY
 {
 	Sampler = (Sampler & 0xF) + 16 * (Sampler >= D3DDMAPSAMPLER);
 
-	d912pxy_s.render.tex.ModSampler(Sampler, Type, Value);
+	d912pxy_s.render.state.tex.ModSampler(Sampler, Type, Value);
 
 	return D3D_OK;
 }

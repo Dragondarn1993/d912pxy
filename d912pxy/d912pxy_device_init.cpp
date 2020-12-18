@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -49,7 +49,7 @@ void d912pxy_device::Init(IDirect3DDevice9* dev, void* par)
 	FRAME_METRIC_PRESENT(1)
 #endif
 
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_PERF_GRAPH))
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_PERF_GRAPH) || d912pxy_s.config.GetValueUI32(PXY_CFG_EXTRAS_ENABLE))
 		perfGraph = new d912pxy_performance_graph(0);
 	else
 		perfGraph = NULL;
@@ -65,6 +65,11 @@ void d912pxy_device::Init(IDirect3DDevice9* dev, void* par)
 	LOG_INFO_DTDM2(InitDrawUPBuffers(), "Startup step  9/10");
 	LOG_INFO_DTDM2(InitDefaultSwapChain(&initialPresentParameters), "Startup step 10/10");
 	LOG_INFO_DTDM2(d912pxy_s.render.iframe.Start(), "Started first IFrame");
+
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_EXTRAS_ENABLE))
+	{
+		LOG_INFO_DTDM2(d912pxy_s.extras.Init(), "Initializing extras");
+	}
 
 	isRunning.SetValue(1);
 }
@@ -127,52 +132,20 @@ void d912pxy_device::CopyOriginalDX9Data(IDirect3DDevice9* dev, D3DDEVICE_CREATI
 
 void d912pxy_device::InitVFS()
 {
+	d912pxy_s.vfs.SetWriteMask((UINT32)d912pxy_s.config.GetValueXI64(PXY_CFG_VFS_WRITE_MASK));
+
 	d912pxy_s.vfs.Init(d912pxy_helper::GetFilePath(FP_VFS_LOCK_FILE)->s);
 
 	if (!d912pxy_s.vfs.IsWriteAllowed())
 	{
-		LOG_INFO_DTDM("VFS is locked by another process, no data will be saved on disk");
-	}
+		LOG_WARN_DTDM("VFS is in read-only mode, no data will be saved on disk");
+	}	
 
 	d912pxy_s.vfs.SetRoot(d912pxy_s.config.GetValueRaw(PXY_CFG_VFS_ROOT));
 
 	UINT64 memcacheMask = d912pxy_s.config.GetValueXI64(PXY_CFG_VFS_MEMCACHE_MASK);
-
-	d912pxy_vfs_id_name vfsNames[] = {
-		{PXY_VFS_BID_CSO,						"shader_cso"},
-		{PXY_VFS_BID_SHADER_PROFILE,			"shader_profiles"},
-		{PXY_VFS_BID_PSO_CACHE_KEYS,			"pso_cache"},
-		{PXY_VFS_BID_PSO_PRECOMPILE_LIST,		"pso_precompile"},
-		{PXY_VFS_BID_SHADER_SOURCES,			"shader_sources"},
-		{PXY_VFS_BID_DERIVED_CSO_VS,			"derived_cso_vs"},
-		{PXY_VFS_BID_DERIVED_CSO_PS,			"derived_cso_ps"},
-		{0, 0}
-	};
-
-	d912pxy_vfs_packer* packer = new d912pxy_vfs_packer(d912pxy_s.config.GetValueRaw(PXY_CFG_VFS_ROOT), vfsNames);
-
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_VFS_PACK_DATA))
-	{				
-		packer->PackArchive(d912pxy_helper::GetFilePath(FP_VFS_PACK_FILE)->s);
-	}
-	else if (packer->IsUnpackNeeded())
-	{
-		packer->UnpackArchive(d912pxy_helper::GetFilePath(FP_VFS_PACK_FILE)->s);
-	}
-
-	delete packer;
 	
-	for (int i = 0; i != PXY_VFS_BID_END; ++i)
-		InitVFSitem(&vfsNames[i], memcacheMask);
-}
-
-void d912pxy_device::InitVFSitem(d912pxy_vfs_id_name* id, UINT64 memCache)
-{
-	if (!d912pxy_s.vfs.LoadVFS(id, ((1ULL << id->num) & memCache)) != 0ULL)
-	{
-		LOG_ERR_DTDM("%S VFS not loaded", id->name);
-		LOG_ERR_THROW2(-1, "VFS error");
-	}
+	d912pxy_s.vfs.LoadVFS();
 }
 
 void d912pxy_device::InitClassFields()
@@ -182,7 +155,6 @@ void d912pxy_device::InitClassFields()
 	d912pxy_hlsl_generator::FillHandlers();
 	d912pxy_hlsl_generator::allowPP_suffix = d912pxy_s.config.GetValueUI32(PXY_CFG_SDB_ALLOW_PP_SUFFIX);
 	d912pxy_hlsl_generator::NaNguard_flag = d912pxy_s.config.GetValueUI32(PXY_CFG_SDB_NAN_GUARD_FLAG);
-	d912pxy_hlsl_generator::sRGB_alphatest_bits = d912pxy_s.config.GetValueUI32(PXY_CFG_SDB_SRGB_ALPHATEST_FLAG);
 
 	d912pxy_vstream::threadedCtor = d912pxy_s.config.GetValueUI32(PXY_CFG_MT_VSTREAM_CTOR);
 	d912pxy_surface::threadedCtor = d912pxy_s.config.GetValueUI32(PXY_CFG_MT_SURFACE_CTOR);
@@ -199,12 +171,10 @@ void d912pxy_device::InitSingletons()
 {	
 	d912pxy_s.dx12.que.Init(PXY_INNER_MAX_CLEANUPS_PER_SYNC, PXY_INNER_MAX_IFRAME_CLEANUPS, 0);
 
-	if (d912pxy_s.config.GetValueUI64(PXY_CFG_REPLAY_BEHAIVOUR))
-		d912pxy_s.render.replay.Init();
-	else {
-		LOG_ERR_DTDM("This feature is compile time disabled, using 1 thread replay");
-		d912pxy_s.render.replay.Init();
-	}
+	d912pxy_s.render.replay.Init();
+
+	if (!d912pxy_s.config.GetValueUI64(PXY_CFG_REPLAY_BEHAIVOUR))
+		LOG_ERR_DTDM("This feature is no longer available, sorry!");
 
 	d912pxy_s.render.db.shader.Init();
 
@@ -287,14 +257,10 @@ void d912pxy_device::InitComPatches()
 			mFakeOccQuery = NULL;
 	}
 
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_SDB_ENABLE_PROFILING))
-	{
-		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_SETTEXTURE, &d912pxy_device::com_SetTexture_PS);
-		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_DRAWINDEXEDPRIMITIVE, &d912pxy_device::com_DrawIndexedPrimitive_PS);		
-	}
-	else if (d912pxy_s.config.GetValueUI32(PXY_CFG_COMPAT_BATCH_COMMIT))
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_COMPAT_BATCH_COMMIT))
 	{
 		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_DRAWINDEXEDPRIMITIVE, &d912pxy_device::com_DrawIndexedPrimitive_Compat);
+		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_DRAWPRIMITIVE, &d912pxy_device::com_DrawPrimitive_Compat);
 	}
 
 	if (d912pxy_s.config.GetValueUI32(PXY_CFG_COMPAT_DUP_UNSAFE))
@@ -303,10 +269,13 @@ void d912pxy_device::InitComPatches()
 		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_DRAWPRIMITIVEUP, &d912pxy_device::com_DrawPrimitiveUP_StateUnsafe);
 	}
 
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_PERF_GRAPH))
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_EXTRAS_ENABLE))
 	{
+		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_PRESENT, &d912pxy_device::com_Present_Extra);		
+	} else if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_PERF_GRAPH))
+	{		
 		d912pxy_com_route_set(PXY_COM_ROUTE_DEVICE, PXY_COM_METHOD_DEV_PRESENT, &d912pxy_device::com_Present_PG);
-	}
+	}	
 }
 
 void d912pxy_device::InitNullSRV()
@@ -332,7 +301,7 @@ void d912pxy_device::InitDrawUPBuffers()
 {
 	d912pxy_s.render.draw_up.Init();
 
-	m_clearEmul = new d912pxy_surface_clear(this);
+	m_emulatedSurfaceOps = new d912pxy_surface_ops(this);
 }
 
 void d912pxy_device::InitDescriptorHeaps()
@@ -348,7 +317,25 @@ void d912pxy_device::PrintInfoBanner()
 	LOG_INFO_DTDM("d912pxy(Direct3D9 to Direct3D12 api proxy) starting up");
 	LOG_INFO_DTDM("Original project link: https://github.com/megai2/d912pxy/");
 	LOG_INFO_DTDM(BUILD_VERSION_NAME);
-	LOG_INFO_DTDM("Batch Limit: %u", PXY_INNER_MAX_IFRAME_BATCH_COUNT);
+
+#if _WIN64
+	LOG_INFO_DTDM("Platform: win x64");	
+#elif _WIN32
+	LOG_INFO_DTDM("Platform: win x86(32bit)");
+#else 
+	LOG_INFO_DTDM("Platform: unknown");
+#endif
+
+#ifdef __AVX2__	
+	LOG_INFO_DTDM("CPU arch: AVX2");
+#else 
+	#ifdef __AVX__
+		LOG_INFO_DTDM("CPU arch: AVX");
+    #else
+		LOG_INFO_DTDM("CPU arch: SSE");
+	#endif	
+#endif
+	LOG_INFO_DTDM("Batch Limit: %u", d912pxy_s.config.GetValueUI32(PXY_CFG_BATCHING_MAX_BATCHES_PER_IFRAME));
 	LOG_INFO_DTDM("Recreation Limit: %u", PXY_INNER_MAX_IFRAME_CLEANUPS);
 	LOG_INFO_DTDM("TextureBind Limit: %u", PXY_INNER_MAX_TEXTURE_STAGES);
 	LOG_INFO_DTDM("RenderTargets Limit: %u", PXY_INNER_MAX_RENDER_TARGETS);
@@ -357,19 +344,41 @@ void d912pxy_device::PrintInfoBanner()
 	LOG_INFO_DTDM("!!!NOT INTENDED TO PERFORM ALL DIRECT3D9 FEATURES!!!");
 	LOG_INFO_DTDM("DX9: original display mode width %u height %u", cached_dx9displaymode.Width, cached_dx9displaymode.Height);
 
-	LOG_INFO_DTDM("Redirecting debug messages to P7");
-	LOG_INFO_DTDM("Adding vectored exception handler");
-	d912pxy_helper::InstallVehHandler();
+	d912pxy_helper::InitLogModule();
 
-
-	if (d912pxy_s.config.GetValueUI32(PXY_CFG_SDB_ENABLE_PROFILING))
-		LOG_INFO_DTDM("Running ps build, expect performance drops");
-
-	UINT64 memKb = 0;
-
-	if (GetPhysicallyInstalledSystemMemory(&memKb))
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_LOG_ENABLE_VEH))
 	{
-		LOG_INFO_DTDM("System physical RAM size: %llu Gb", memKb >> 20llu);
+		LOG_INFO_DTDM("Adding vectored exception handler");
+		d912pxy_helper::InstallVehHandler();		
+		LOG_INFO_DTDM("dbg messages and errors are now redirected to log file");
+	}
+	
+	OSVERSIONINFOEX info;
+	ZeroMemory(&info, sizeof(OSVERSIONINFOEX));
+	info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+
+	if (d912pxy_helper::GetTrueWindowsVersion(&info))
+	{
+		LOG_INFO_DTDM("OS: v%u.%u %s r%u", info.dwMajorVersion, info.dwMinorVersion, info.szCSDVersion,info.dwBuildNumber);
+	}
+	else {
+		LOG_ERR_DTDM("OS: unknown");
+	}
+	
+	MEMORYSTATUSEX ramInfo;
+
+	ramInfo.dwLength = sizeof(ramInfo);
+
+	if (GlobalMemoryStatusEx(&ramInfo))
+	{
+		LOG_INFO_DTDM("System RAM info");
+		LOG_INFO_DTDM("- phys: %0.3f Gb", (ramInfo.ullTotalPhys >> 20llu)/1024.0f);
+		LOG_INFO_DTDM("- commit limit: %0.3f Gb", (ramInfo.ullTotalPageFile >> 20llu)/ 1024.0f);
+		LOG_INFO_DTDM("- usable: %0.3f Gb", (ramInfo.ullAvailPageFile >> 20llu) / 1024.0f);
+		LOG_INFO_DTDM("- phys usable: %0.3f Gb", (ramInfo.ullAvailPhys >> 20llu) / 1024.0f);
+	}
+	else {
+		LOG_ERR_DTDM("No info about system RAM is available");
 	}
 
 	//string includes manufacturer, model and clockspeed
@@ -378,6 +387,8 @@ void d912pxy_device::PrintInfoBanner()
 	SYSTEM_INFO sysInf = { 0 };
 	GetSystemInfo(&sysInf);
 	LOG_INFO_DTDM("CPU cores: %u", sysInf.dwNumberOfProcessors);
+
+	cpuCoreCount = sysInf.dwNumberOfProcessors;
 
 	LOG_INFO_DTDM("=========================================== Config data");
 
@@ -526,6 +537,14 @@ ComPtr<ID3D12Device> d912pxy_device::SelectSuitableGPU()
 	gpu_totalVidmemMB = (DWORD)(pDesc.DedicatedVideoMemory >> 20llu);
 
 	LOG_INFO_DTDM("GPU name: %s vidmem: %u Mb", pDesc.Description, gpu_totalVidmemMB);
+
+	//nvidia 
+	if (pDesc.VendorId == 0x10de)
+	{
+		NvGPU_force_highpower();
+	}
+	else
+		nvapi = 0;
 	
 	for (int i = 0; i != 128; ++i)
 	{		
@@ -599,9 +618,118 @@ void d912pxy_device::SetupDevice(ComPtr<ID3D12Device> device)
 		1 << (vaSizes.MaxGPUVirtualAddressBitsPerResource - 20), 1 << (vaSizes.MaxGPUVirtualAddressBitsPerProcess - 20)
 	);
 
-	LOG_INFO_DTDM("Adapter Nodes: %u", m_d12evice->GetNodeCount());
 
+	D3D12_FEATURE_DATA_CROSS_NODE crossNode;
+	if (!FAILED(m_d12evice->CheckFeatureSupport(D3D12_FEATURE_CROSS_NODE, &crossNode, sizeof(crossNode))))
+	{
+		LOG_INFO_DTDM("Device cross node sharing tier: %u", crossNode.SharingTier);
+	} else 
+		LOG_INFO_DTDM("Device cross node sharing tier: not available", crossNode.SharingTier);
+	
+
+	LOG_INFO_DTDM("Adapter Nodes: %u", m_d12evice->GetNodeCount());
+	
 	LOG_DBG_DTDM("dev %016llX", m_d12evice.Get());
+}
+
+void d912pxy_device::NvGPU_force_highpower()
+{
+	nvapi = init_nv_api_oc();
+
+	nvapi_dynPstateChanged = 0;
+
+	if (!nvapi)
+	{
+		LOG_ERR_DTDM("Can't load nv_api!");
+		return;
+	}
+
+	LOG_INFO_DTDM("============ nv api =============");
+
+	int nGPU = 0, systype = 0, memsize = 0, memtype = 0;
+	int *hdlGPU[64] = { 0 };
+	char sysname[64] = { 0 }, biosname[64] = { 0 };
+	char drvname[64] = { 0 }; NvU32 drv_ver;
+	NV_GPU_PERF_PSTATES20_INFO_V1 pstates_info;
+	pstates_info.version = 0x11c94;
+
+	nvapi->Init();
+	nvapi->EnumGPUs(hdlGPU, &nGPU);
+	nvapi->GetSysType(hdlGPU[0], &systype);
+	nvapi->GetName(hdlGPU[0], sysname);
+	nvapi->GetMemSize(hdlGPU[0], &memsize);
+	nvapi->GetMemType(hdlGPU[0], &memtype);
+	nvapi->GetBiosName(hdlGPU[0], biosname);
+	nvapi->GetPstates(hdlGPU[0], &pstates_info);
+	nvapi->GetDriverAndBranchVersion(&drv_ver, drvname);
+
+	LOG_INFO_DTDM("Name: %S", sysname);
+
+	switch (systype) {
+		case 1:     LOG_INFO_DTDM("Type: Laptop"); break;
+		case 2:     LOG_INFO_DTDM("Type: Desktop"); break;
+		default:    LOG_INFO_DTDM("Type: Unknown"); break;
+	}
+	
+	LOG_INFO_DTDM("VRAM: %dMB GDDR%d", memsize / 1024, memtype <= 7 ? 3 : 5);
+	LOG_INFO_DTDM("BIOS: %S", biosname);
+	LOG_INFO_DTDM("GPU: %dMHz", (int)((pstates_info.pstates[0].clocks[0]).data.range.maxFreq_kHz) / 1000);
+	LOG_INFO_DTDM("RAM: %dMHz", (int)((pstates_info.pstates[0].clocks[1]).data.single.freq_kHz) / 1000);
+	LOG_INFO_DTDM("Current GPU OC: %dMHz", (int)((pstates_info.pstates[0].clocks[0]).freqDelta_kHz.value) / 1000);
+	LOG_INFO_DTDM("Current RAM OC: %dMHz", (int)((pstates_info.pstates[0].clocks[1]).freqDelta_kHz.value) / 1000);
+	LOG_INFO_DTDM("Driver: ver %u branch %S", drv_ver, drvname);
+	
+	if (d912pxy_s.config.GetValueUI32(PXY_CFG_MISC_NV_DISABLE_THROTTLE))
+	{
+		//megai2: this is not working in terms of "//!< bit 0 indicates if the dynamic Pstate is enabled or not", at least for me
+		/*
+		NV_GPU_DYNAMIC_PSTATES_INFO_EX dynPstateInfo;
+
+		dynPstateInfo.version = 0x10048;
+
+		if (nvapi->GetDynamicPstatesInfoEx(hdlGPU[0], &dynPstateInfo))
+		{
+			LOG_ERR_DTDM("Can't get dynamic pstate info");
+			return;
+		}
+		
+		if (dynPstateInfo.flags & 1)*/
+
+		{			
+			LOG_INFO_DTDM("**UNSAFE** Disabling dynamic power managment");
+			if (nvapi->EnableDynamicPstates(hdlGPU[0], 0))
+			{
+				LOG_ERR_DTDM("Can't disable dynamic pstate, sorry");
+				return;
+			}
+			nvapi_dynPstateChanged = 1;
+		}
+	}
+	
+	LOG_INFO_DTDM("=================================");
+}
+
+void d912pxy_device::NvGPU_restore()
+{
+	if (!nvapi)
+		return;
+
+	if (nvapi_dynPstateChanged)
+	{
+		LOG_INFO_DTDM("Restoring dynamic power managment");
+
+		int nGPU = 0;
+		int *hdlGPU[64] = { 0 };
+
+		nvapi->EnumGPUs(hdlGPU, &nGPU);
+
+		if (nvapi->EnableDynamicPstates(hdlGPU[0], 1))
+		{
+			LOG_ERR_DTDM("Can't enable back dynamic pstate! Something is broken, this is very very bad!");
+		}
+	}
+
+	nvapi->Unload();
 }
 
 #undef API_OVERHEAD_TRACK_LOCAL_ID_DEFINE 

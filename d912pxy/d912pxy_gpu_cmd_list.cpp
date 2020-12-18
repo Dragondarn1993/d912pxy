@@ -61,7 +61,7 @@ d912pxy_gpu_cmd_list::~d912pxy_gpu_cmd_list()
 	Signal();
 	WaitNoCleanup();
 	
-	CleanupAllReferenced();
+	FinalReferenceCleanup();
 
 	delete mGpuRefs;
 
@@ -142,16 +142,19 @@ void d912pxy_gpu_cmd_list::EnqueueCleanup(d912pxy_comhandler * obj)
 	mGpuRefs->WriteElement(obj);
 }
 
-void d912pxy_gpu_cmd_list::CleanupAllReferenced()
+void d912pxy_gpu_cmd_list::FinalReferenceCleanup()
 {
+	auto totalRefs = mGpuRefs->TotalElements();
 	while (mGpuRefs->HaveElements())
 	{
 		d912pxy_comhandler* obj = mGpuRefs->GetElement();		
-		if (!obj->FinalRelease())
-		{
-			//for multithread holded objects
-			mGpuRefs->WriteElement(obj);
-		}
+		LOG_ASSERT(obj->FinalRelease(), "obj->FinalRelease() wrong cleanup");
+
+		if (!totalRefs && mGpuRefs->TotalElements())
+			LOG_WARN_DTDM("%u elements still pending in cmd list references", mGpuRefs->TotalElements());
+		else
+			--totalRefs;
+
 		mGpuRefs->Next();
 	}
 }
@@ -185,17 +188,14 @@ void d912pxy_gpu_cmd_list::EnableGID(d912pxy_gpu_cmd_list_group id, UINT32 prio)
 
 	for (int i = 0; i != totalActCLs; ++i)
 	{
-		for (int j = i; j != totalActCLs; ++j)
+		for (int j = i + 1; j != totalActCLs; ++j)
 		{
 			if (mCLPrio[i] > mCLPrio[j])
 			{
-				d912pxy_gpu_cmd_list_entry swp = mActCL[i];
-				mActCL[i] = mActCL[j];
-				mActCL[j] = swp;
+				using std::swap;
 
-				UINT32 swpPr = mCLPrio[i];
-				mCLPrio[i] = mCLPrio[j];
-				mCLPrio[j] = swpPr;
+				swap(mActCL[i], mActCL[j]);
+				swap(mCLPrio[i], mCLPrio[j]);
 			}
 		}
 	}

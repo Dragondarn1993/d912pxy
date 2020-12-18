@@ -25,7 +25,7 @@ SOFTWARE.
 #include "stdafx.h"
 
 #ifdef _DEBUG
-LONG g_ObjectsCounter = 0;
+std::atomic<LONG> g_ObjectsCounter { 0 };
 
 #include <map>
 
@@ -46,9 +46,17 @@ d912pxy_noncom::d912pxy_noncom()
 d912pxy_noncom::~d912pxy_noncom()
 {
 #ifdef _DEBUG	
-	//InterlockedDecrement(&g_ObjectsCounter);
+	if (lkObjTrace != 0)
+	{
+		UnInit();
+	}
+#endif
+}
 
-	LOG_DBG_DTDM("Objs last = %u", g_ObjectsCounter);
+void d912pxy_noncom::UnInit()
+{
+#ifdef _DEBUG	
+	LOG_DBG_DTDM("Objs last = %u", g_ObjectsCounter.load());
 
 	WaitForSingleObject(gLeakMapLock, INFINITE);
 	gLeakTracker->erase(lkObjTrace);
@@ -60,7 +68,7 @@ d912pxy_noncom::~d912pxy_noncom()
 		for (std::map<UINT, const wchar_t*>::iterator it = gLeakTracker->begin(); it != gLeakTracker->end(); ++it)
 		{
 			LOG_DBG_DTDM3("obj %u = %s is leaked", it->first, it->second);
-		}		
+		}
 	}
 
 	if (gLeakTracker->empty())
@@ -69,6 +77,8 @@ d912pxy_noncom::~d912pxy_noncom()
 
 		delete gLeakTracker;
 	}
+
+	lkObjTrace = 0;
 #endif
 }
 
@@ -98,7 +108,7 @@ void d912pxy_noncom::NonCom_Init(const wchar_t * logModule)
 	LOG_DBG_DTDM("new %s", logModule);
 
 #ifdef _DEBUG
-	LONG ouid = InterlockedIncrement(&g_ObjectsCounter);
+	LONG ouid = ++g_ObjectsCounter;
 
 	LOG_DBG_DTDM("obj %u is %s", ouid, logModule);
 

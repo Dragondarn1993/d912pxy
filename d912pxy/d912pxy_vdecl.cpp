@@ -24,12 +24,13 @@ SOFTWARE.
 */
 #include "stdafx.h"
 
-d912pxy_vdecl::d912pxy_vdecl(const D3DVERTEXELEMENT9* data) : d912pxy_comhandler(PXY_COM_OBJ_VDECL, L"vdecl")
+d912pxy_vdecl::d912pxy_vdecl(const D3DVERTEXELEMENT9* data) 
+	: d912pxy_comhandler(PXY_COM_OBJ_VDECL, L"vdecl")
+	, usedStreamSlots(0)
+	, mInstancedModificationMask(0)
 {
-	mHash = 0;
-
 	usedStreamSlots = 0;
-	instancedDecl = 0;
+	instancedDecl = nullptr;
 
 	for (int i = 0; i != PXY_INNER_MAX_VDECL_LEN; ++i)
 	{
@@ -43,6 +44,7 @@ d912pxy_vdecl::d912pxy_vdecl(const D3DVERTEXELEMENT9* data) : d912pxy_comhandler
 		declData[i] = data[i];
 
 		declData12[i].InputSlot = data[i].Stream;
+		declData12[i].SemanticIndex = 0;
 
 		usedStreamSlots |= 1 << data[i].Stream;
 
@@ -174,6 +176,8 @@ d912pxy_vdecl::d912pxy_vdecl(const D3DVERTEXELEMENT9* data) : d912pxy_comhandler
 
 	inputEleFmt.NumElements = declLen - 1;
 	inputEleFmt.pInputElementDescs = declData12;
+
+	UpdateHash();
 }
 
 d912pxy_vdecl * d912pxy_vdecl::d912pxy_vdecl_com(const D3DVERTEXELEMENT9 * data)
@@ -206,7 +210,8 @@ D3D12_INPUT_LAYOUT_DESC* d912pxy_vdecl::GetD12IA_InputElementFmt()
 
 void d912pxy_vdecl::ModifyStreamElementType(UINT stream, D3D12_INPUT_CLASSIFICATION newMode)
 {
-	for (int i = 0; i != declLen; ++i)
+	//megai2: last one is end marker that is not populated for dx12 declData, so we need to skip it
+	for (int i = 0; i != declLen-1; ++i)
 	{
 		if (declData12[i].InputSlot == stream)
 		{
@@ -221,11 +226,33 @@ void d912pxy_vdecl::ModifyStreamElementType(UINT stream, D3D12_INPUT_CLASSIFICAT
 	}
 }
 
-d912pxy_vdecl * d912pxy_vdecl::GetInstancedModification()
+void d912pxy_vdecl::UpdateHash()
+{
+	mHash = d912pxy::Hash32(d912pxy::MemoryArea((void*)declData, declLen * sizeof(D3DVERTEXELEMENT9))).value;
+}
+
+d912pxy_vdecl * d912pxy_vdecl::GetInstancedModification(UINT streamMask, D3D12_INPUT_CLASSIFICATION newMode)
 {
 	if (!instancedDecl)
 	{
-		instancedDecl = d912pxy_vdecl::d912pxy_vdecl_com(declData);		
+		instancedDecl = d912pxy_vdecl::d912pxy_vdecl_com(declData);	
+		mInstancedModificationMask = streamMask;
+
+		UINT i = 0;
+		while (streamMask)
+		{
+			if (streamMask & 1)
+				instancedDecl->ModifyStreamElementType(i, newMode);
+
+			++i;
+			streamMask = streamMask >> 1;
+		}
+		
+		instancedDecl->UpdateHash();
+	}
+	else if (mInstancedModificationMask != streamMask)
+	{	
+		LOG_ERR_THROW2(-1, "API stream need extended instanced vdecl handling");
 	}
 
 	return instancedDecl;
@@ -233,11 +260,6 @@ d912pxy_vdecl * d912pxy_vdecl::GetInstancedModification()
 
 UINT32 d912pxy_vdecl::GetHash()
 {
-	if (!mHash)
-	{
-		void* mem = declData;
-		mHash = d912pxy_memtree2::memHash32s(mem, declLen * sizeof(D3DVERTEXELEMENT9));		
-	}
 	return mHash;
 }
 

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -24,39 +24,21 @@ SOFTWARE.
 */
 #include "stdafx.h"
 
-d912pxy_vfs_file_header s_headerTable[PXY_VFS_MAX_FILES_PER_BID];
+d912pxy_thread_lock d912pxy_vfs_locked_entry::itemLocks[PXY_VFS_MAX_BID];
 
 d912pxy_vfs::d912pxy_vfs()
-{
-
+{	
 }
 
 
 d912pxy_vfs::~d912pxy_vfs()
 {	
-	for (int i = 0; i != PXY_VFS_MAX_BID; ++i)
-	{
-		d912pxy_vfs_entry* item = &items[i];
-		if (item->m_vfsBlocks != NULL)
-		{
-			fflush(item->m_vfsBlocks);
-			fclose(item->m_vfsBlocks);
-
-			delete item->m_vfsFileOffsets;
-
-			if (item->m_vfsCache)
-				PXY_FREE(item->m_vfsCache);
-		}
-	}
-
-	if (writeAllowed)
-	{		
-		CloseHandle(lockFile);
-	}
 }
 
 void d912pxy_vfs::Init(const char * lockPath)
 {	
+	NonCom_Init(L"vfs");
+
 	lockFile = CreateFileA(lockPath, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
 	if (lockFile == INVALID_HANDLE_VALUE)
 	{
@@ -65,16 +47,33 @@ void d912pxy_vfs::Init(const char * lockPath)
 	else {
 		DWORD pid = GetProcessId(GetCurrentProcess());
 		DWORD ret = 0;
-		WriteFile(lockFile, &pid, 4, &ret, NULL);
+		::WriteFile(lockFile, &pid, 4, &ret, NULL);
 		writeAllowed = 1;
 	}
 
-	ZeroMemory(items, sizeof(d912pxy_vfs_entry)*PXY_VFS_MAX_BID);	
-
-	for (int i = 0; i != PXY_VFS_MAX_BID; ++i)
+	if (cuWriteMask == ((1 << (UINT)d912pxy_vfs_bid::end) - 1))
 	{
-		items[i].lock.Init();
+		TakeOutWriteAccess();
 	}
+	
+	for (int i = 0; i != (UINT)d912pxy_vfs_bid::end; ++i)
+		items[i] = new d912pxy_vfs_entry(i);
+}
+
+void d912pxy_vfs::UnInit()
+{
+	for (int i = 0; i != (UINT)d912pxy_vfs_bid::end; ++i)
+		delete items[i];
+
+	if (writeAllowed)
+	{
+		CloseHandle(lockFile);
+	}
+
+	cuPck->Close(0);
+	delete cuPck;
+
+	d912pxy_noncom::UnInit();
 }
 
 void d912pxy_vfs::SetRoot(wchar_t * rootPath)
@@ -82,281 +81,238 @@ void d912pxy_vfs::SetRoot(wchar_t * rootPath)
 	sprintf(m_rootPath, "%s/%ws", d912pxy_helper::GetFilePath(FP_VFS_PREFIX)->s, rootPath);
 }
 
-void* d912pxy_vfs::LoadVFS(d912pxy_vfs_id_name* id, UINT memCache)
+void d912pxy_vfs::LoadVFS()
 {
-	char fn[4096];
+	LoadPckFromRootPath();
 
-	sprintf(fn, "%s/%s.pck", m_rootPath, id->name);
-
-	d912pxy_vfs_entry* item = &items[id->num];
-
-	item->m_vfsBlocks = fopen(fn, "rb+");
-
-	if (item->m_vfsBlocks == NULL)
-		item->m_vfsBlocks = fopen(fn, "wb+");
-
-	if (item->m_vfsBlocks == NULL)
+	if (!cuPck)
 	{
-		return NULL;
-	}
+		wchar_t newPck[4096];
+		wsprintf(newPck, L"%S/%s", m_rootPath, PXY_VFS_LATEST_PCK);
 
-	fseek(item->m_vfsBlocks, 0, SEEK_END);
-		
-	UINT sz = ftell(item->m_vfsBlocks);
+		//try to remove old file before creating if it somehow corrupted
+		DeleteFile(newPck);
 
-	fseek(item->m_vfsBlocks, 0, SEEK_SET);
-
-	item->m_vfsFileOffsets = new d912pxy_memtree2(8, 256, 2);
-
-	item->m_vfsLastFileOffset = PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START;
-	item->m_vfsFileCount = 0;
-	
-	ZeroMemory(s_headerTable, PXY_VFS_BID_TABLE_SIZE);
-
-	UINT64 signature[2] = { PXY_VFS_SIGNATURE, PXY_VFS_VER };
-
-	if (sz < PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START)
-	{					
-		if (fwrite(signature, 8, 2, item->m_vfsBlocks) != 2)
-			return NULL;
-		
-		fwrite(s_headerTable, PXY_VFS_FILE_HEADER_SIZE, PXY_VFS_MAX_FILES_PER_BID, item->m_vfsBlocks);
-		fwrite(&sz, 1, 4, item->m_vfsBlocks);
-
-		fflush(item->m_vfsBlocks);
-	}
-	else {
-
-		UINT64 readedSignature[2] = { 0,0 };
-
-		if (fread(readedSignature, 8, 2, item->m_vfsBlocks) != 2)
-			return NULL;
-
-		if (memcmp(signature, readedSignature, 16))
+		cuPck = new d912pxy_vfs_pck(newPck, writeAllowed);
+		if (cuPck->GetStatus())
 		{
-			return NULL;
-		}
+			LOG_ERR_DTDM("Latest pck file is broken, nothing will be saved");
 
-		fseek(item->m_vfsBlocks, 0, SEEK_SET);
-
-		if (fwrite(signature, 8, 2, item->m_vfsBlocks) != 2)
-			return NULL;
-
-		fseek(item->m_vfsBlocks, 16, SEEK_SET);
-
-		fread(s_headerTable, PXY_VFS_FILE_HEADER_SIZE, PXY_VFS_MAX_FILES_PER_BID, item->m_vfsBlocks);
-		
-		for (int i = 0; i != PXY_VFS_MAX_FILES_PER_BID; ++i)
-		{
-			if (s_headerTable[i].offset > item->m_vfsLastFileOffset)			
-				item->m_vfsLastFileOffset = s_headerTable[i].offset;
-
-			if (s_headerTable[i].hash != 0)
-			{
-				item->m_vfsFileOffsets->PointAtMem(&s_headerTable[i].hash, 8);
-				item->m_vfsFileOffsets->SetValue(s_headerTable[i].offset);
-				++item->m_vfsFileCount;
-			}
-		}
-
-		if (item->m_vfsLastFileOffset > 0)
-		{
-
-			fseek(item->m_vfsBlocks, (UINT32)item->m_vfsLastFileOffset, SEEK_SET);
-
-			UINT32 lastFileSize;
-
-			fread(&lastFileSize, 4, 1, item->m_vfsBlocks);
-
-			item->m_vfsLastFileOffset += lastFileSize + 4;
-		}
-		else
-			item->m_vfsLastFileOffset = PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START;
-
-		if (item->m_vfsLastFileOffset == sz)
-		{
-			fseek(item->m_vfsBlocks, 0, SEEK_END);
-			fwrite(&sz, 1, 4, item->m_vfsBlocks);
-			fflush(item->m_vfsBlocks);
-		}
-		
-		item->m_vfsCacheSize = (UINT32)item->m_vfsLastFileOffset - PXY_VFS_BID_TABLE_SIZE - PXY_VFS_BID_TABLE_START;
-
-		if (item->m_vfsCacheSize && memCache)
-		{
-			PXY_MALLOC(item->m_vfsCache, item->m_vfsCacheSize, void*);
-
-
-			fseek(item->m_vfsBlocks, PXY_VFS_BID_TABLE_SIZE+PXY_VFS_BID_TABLE_START, SEEK_SET);
-
-			fread(item->m_vfsCache, 1, item->m_vfsCacheSize, item->m_vfsBlocks);
-		}
-		else {
-			item->m_vfsCache = 0;
-			item->m_vfsCacheSize = 0;
-		}
+			TakeOutWriteAccess();
+		}		
 	}	
-
-	return item->m_vfsBlocks;
 }
 
-UINT64 d912pxy_vfs::IsPresentN(const char * fnpath, UINT32 vfsId)
-{	
-	return IsPresentH(HashFromName(fnpath), vfsId);
-}
-
-UINT64 d912pxy_vfs::IsPresentH(UINT64 fnHash, UINT32 vfsId)
+bool d912pxy_vfs::ReadFile(d912pxy_vfs_path path, d912pxy_mem_block to)
 {
-	d912pxy_vfs_entry* item = &items[vfsId];
+	UINT64 sz;
+	void* ptr = GetBidLocked(path)->GetFileDataH(path.pathHash(), &sz);
 
-	{
-		if (item->m_vfsBlocks != NULL)
-		{
-			item->m_vfsFileOffsets->PointAtMem(&fnHash, 8);
-			UINT64 offset = item->m_vfsFileOffsets->CurrentCID();
-
-			if (offset)
-			{
-				return offset;
-			}
-		}
-	}
-
-	return 0;
-}
-
-void * d912pxy_vfs::LoadFileN(const char * fnpath, UINT * sz, UINT id)
-{
-	return LoadFileH(HashFromName(fnpath), sz, id);
-}
-
-void d912pxy_vfs::WriteFileN(const char * fnpath, void * data, UINT sz, UINT id)
-{
-	WriteFileH(HashFromName(fnpath), data, sz, id);
-}
-
-void d912pxy_vfs::ReWriteFileN(const char * fnpath, void * data, UINT sz, UINT id)
-{
-	ReWriteFileH(HashFromName(fnpath), data, sz, id);
-}
-
-void * d912pxy_vfs::LoadFileH(UINT64 namehash, UINT * sz, UINT id)
-{
-	d912pxy_vfs_entry* item = &items[id];
-
-	item->lock.Hold();
+	if (ptr == nullptr)
+		return false;
 	
-	UINT64 offset = IsPresentH(namehash, id);
+	if (to.size() != sz)
+		return false;
 
-	if (!offset)
+	memcpy(to.ptr(), ptr, sz);
+
+	return true;
+}
+
+d912pxy_mem_block d912pxy_vfs::ReadFile(d912pxy_vfs_path path)
+{
+	UINT64 sz;
+	void* ptr = GetBidLocked(path)->GetFileDataH(path.pathHash(), &sz);
+	
+	return d912pxy_mem_block::from(ptr, sz);
+}
+
+void d912pxy_vfs::WriteFile(d912pxy_vfs_path path, d912pxy_mem_block data)
+{
+	if (((1 << path.bidIndex()) & cuWriteMask) || (!writeAllowed))
+		return;
+
+	GetBidLocked(path)->WriteFileH(path.pathHash(), data.ptr(), data.size());
+}
+
+d912pxy_ringbuffer<d912pxy_vfs_path_hash>* d912pxy_vfs::GetFileList(d912pxy_vfs_bid bid)
+{
+	d912pxy_ringbuffer<d912pxy_vfs_path_hash>* ret = new d912pxy_ringbuffer<d912pxy_vfs_path_hash>(20, 2);
+
+	d912pxy_vfs_entry::ChunkTree* cuTree = GetBidLocked(bid)->GetChunkTree();
+
+	for (auto i = cuTree->begin(); i < cuTree->end(); ++i)
 	{
-		item->lock.Release();
-		return nullptr;
+		d912pxy_vfs_pck_chunk* chunk = i.value();
+
+		if (chunk && (chunk->dsc.type == CHU_FILE_INFO))
+			ret->WriteElement(chunk->data.file_info.name);
 	}
-
-	if (item->m_vfsCache && ((offset - PXY_VFS_BID_TABLE_SIZE - PXY_VFS_BID_TABLE_START) < item->m_vfsCacheSize))
-	{
-		offset -= PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START;
-
-		item->lock.Release();
-
-		*sz = *((UINT32*)((intptr_t)item->m_vfsCache + offset));
-
-
-		void* ret = NULL;
-
-		PXY_MALLOC(ret, *sz, void*);
-
-		memcpy(ret, ((void*)((intptr_t)item->m_vfsCache + offset + 4)), *sz);
-
-		return ret;
-	}
-
-	fseek(item->m_vfsBlocks, (UINT32)offset, SEEK_SET);
-
-	fread(sz, 4, 1, item->m_vfsBlocks);
-
-
-	void* ret = NULL;
-	PXY_MALLOC(ret, *sz, void*);
-
-	fread(ret, 1, *sz, item->m_vfsBlocks);
-
-	item->lock.Release();
 
 	return ret;
 }
 
-void d912pxy_vfs::WriteFileH(UINT64 namehash, void * data, UINT sz, UINT id)
+bool d912pxy_vfs::IsFilePresent(d912pxy_vfs_path path)
 {
-	if (!writeAllowed)
-		return;
-
-	d912pxy_vfs_entry* item = &items[id];
-
-	item->lock.Hold();
-
-	fseek(item->m_vfsBlocks, PXY_VFS_FILE_HEADER_SIZE*item->m_vfsFileCount + PXY_VFS_BID_TABLE_START, SEEK_SET);
-
-	fwrite(&namehash, 8, 1, item->m_vfsBlocks);
-	fwrite(&item->m_vfsLastFileOffset, 8, 1, item->m_vfsBlocks);
-	++item->m_vfsFileCount;
-
-	fseek(item->m_vfsBlocks, (UINT32)item->m_vfsLastFileOffset, SEEK_SET);
-
-	fwrite(&sz, 1, 4, item->m_vfsBlocks);
-	fwrite(data, 1, sz, item->m_vfsBlocks);
-	fwrite(&sz, 1, 4, item->m_vfsBlocks);
-	fflush(item->m_vfsBlocks);
-
-	item->m_vfsFileOffsets->PointAtMem(&namehash, 8);
-	item->m_vfsFileOffsets->SetValue(item->m_vfsLastFileOffset);
-
-	item->m_vfsLastFileOffset += sz + 4;
-
-	item->lock.Release();
+	return GetBidLocked(path)->IsPresentH(path.pathHash());
 }
 
-void d912pxy_vfs::ReWriteFileH(UINT64 namehash, void * data, UINT sz, UINT id)
+d912pxy_vfs_locked_entry d912pxy_vfs::GetBidLocked(d912pxy_vfs_path path)
 {
-	if (!writeAllowed)
+	return d912pxy_vfs_locked_entry(path.bid(), items);	
+}
+
+d912pxy_vfs_locked_entry d912pxy_vfs::GetBidLocked(d912pxy_vfs_bid bid)
+{
+	return d912pxy_vfs_locked_entry(bid, items);
+}
+
+d912pxy_vfs_pck_chunk * d912pxy_vfs::WriteFileToPck(d912pxy_vfs_pck_chunk* prevChunk, UINT id, UINT64 namehash, void * data, UINT sz)
+{
+	if (prevChunk)
+	{
+		if (prevChunk->dsc.type == CHU_FILE_INFO)
+		{
+			if (prevChunk->parent == cuPck)
+			{
+				items[id]->LoadFileFromDisk(prevChunk);
+				prevChunk = (d912pxy_vfs_pck_chunk*)items[id]->GetLastChunk();
+
+				return WriteFileToPck(prevChunk, id, namehash, data, sz);
+			}
+			else {
+				prevChunk->parent->ModRef(-1);							
+			}
+		}
+		else {
+			if ((prevChunk->parent == cuPck) && (sz == (prevChunk->dsc.size - PXY_VFS_PCK_CHUNK_DSC_SIZE)))
+			{
+				if (data != &prevChunk->data.rawData)
+					memcpy(&prevChunk->data.rawData, data, sz);
+				cuPck->UpdateChunk(prevChunk);
+				return prevChunk;
+			}
+		}
+	}
+
+	d912pxy_vfs_pck_chunk * newChunk = cuPck->WriteFileToPck(id, namehash, sz, data);
+
+	if (prevChunk)
+		PXY_FREE(prevChunk);
+
+	return newChunk;
+}
+
+void d912pxy_vfs::SetWriteMask(UINT32 val)
+{
+	cuWriteMask = val;
+}
+
+void d912pxy_vfs::TakeOutWriteAccess()
+{
+	if (writeAllowed)
+		CloseHandle(lockFile);
+
+	writeAllowed = 0;
+}
+
+void d912pxy_vfs::LoadPckFromRootPath()
+{
+	WIN32_FIND_DATA fdFile;
+	HANDLE hFind = NULL;
+
+	wchar_t sPath[2048];
+	wsprintf(sPath, L"%S\\*.pck", m_rootPath);
+
+	if ((hFind = FindFirstFile(sPath, &fdFile)) == INVALID_HANDLE_VALUE)
 		return;
 
-	d912pxy_vfs_entry* item = &items[id];
+	std::wstring FileName;
+	std::vector<std::wstring> ListOfFileNames;
 
-	item->lock.Hold();
-
-	UINT64 offset = IsPresentH(namehash, id);
-
-	if (offset)
+	do
 	{
-		fseek(item->m_vfsBlocks, (UINT32)offset + 4, SEEK_SET);
-		fwrite(data, 1, sz, item->m_vfsBlocks);
-		fflush(item->m_vfsBlocks);
+		if (wcscmp(fdFile.cFileName, L".") != 0
+			&& wcscmp(fdFile.cFileName, L"..") != 0)
+		{			
+			//Is the entity a File or Folder? 
+			if (fdFile.dwFileAttributes &FILE_ATTRIBUTE_DIRECTORY)
+			{
+				;
+			}
+			else {
+				FileName = fdFile.cFileName;
+				ListOfFileNames.push_back(FileName);
+			}
+		}
+	} while (FindNextFile(hFind, &fdFile)); 
 
-		if (item->m_vfsCache && (item->m_vfsCacheSize > (offset - PXY_VFS_BID_TABLE_SIZE - PXY_VFS_BID_TABLE_START)))
-			memcpy((void*)((intptr_t)item->m_vfsCache + (offset - PXY_VFS_BID_TABLE_SIZE - PXY_VFS_BID_TABLE_START) + 4), data, sz);
+	FindClose(hFind); 
+
+	std::sort(ListOfFileNames.begin(), ListOfFileNames.end());
+	
+	for (std::vector<std::wstring>::iterator it = ListOfFileNames.begin(); it != ListOfFileNames.end(); ++it)
+	{
+		wsprintf(sPath, L"%S/%s", m_rootPath, it->c_str());
+
+		d912pxy_vfs_pck* pck = new d912pxy_vfs_pck(sPath, writeAllowed);
+		
+		if (pck->GetStatus())
+		{
+			delete pck;
+		}
+		else {
+			d912pxy_ringbuffer<d912pxy_vfs_pck_chunk*>* fileList = pck->GetFileList();
+		
+			while (fileList->HaveElements())
+			{
+				d912pxy_vfs_pck_chunk* fileInfo = fileList->GetElement();
+
+				items[fileInfo->data.file_info.category]->AddFileInfo(fileInfo);
+
+				fileList->Next();
+			}
+
+			delete fileList;
+
+			//megai2: never unload latest pck file on ref changes				
+			if (!wcscmp(it->c_str(), PXY_VFS_LATEST_PCK))
+			{
+				cuPck = pck;				
+			} else 
+				pck->ModRef(-1);
+		}		
+	}	
+
+	UINT64 memCache = d912pxy_s.config.GetValueXI64(PXY_CFG_VFS_MEMCACHE_MASK);
+
+	//megai2: load actual data from disk after we collect/overwrite listing from all pck files
+	//if precache specified
+	for (int i = 0; i != (UINT)d912pxy_vfs_bid::end; ++i)
+		//precache all data if write is disabled to allow multi instance runs
+		if ((memCache & (1ULL << i)) || !writeAllowed)
+			items[i]->LoadFilesFromDisk();
+}
+
+d912pxy_vfs_path_hash d912pxy_vfs_path::HashFromName(const char * fnpath)
+{
+	UINT len = (UINT32)strlen(fnpath);
+	d912pxy_vfs_path_hash ret = d912pxy::Hash64(d912pxy::MemoryArea((void*)fnpath, len)).value;
+
+	auto checkPath = d912pxy_vfs_path(ret, d912pxy_vfs_bid::vfs_paths);
+	if (d912pxy_s.vfs.IsFilePresent(checkPath))
+	{
+		auto savedPath = d912pxy_s.vfs.ReadFile(checkPath);
+		if ((savedPath.size() != len) || (memcmp(savedPath.ptr(), fnpath, savedPath.size()) != 0))
+		{
+			abort();
+		}
+		savedPath.Delete();
 	}
 	else
-		WriteFileH(namehash, data, sz, id);
+		d912pxy_s.vfs.WriteFile(checkPath, d912pxy_mem_block::use((void*)fnpath, len));
 
-	item->lock.Release();
-}
+	//TODO also add check for string based path & hash based path conflicts
 
-UINT64 d912pxy_vfs::HashFromName(const char * fnpath)
-{
-	return d912pxy_memtree2::memHash64s((void*)fnpath, (UINT32)strlen(fnpath));
-}
-
-d912pxy_memtree2 * d912pxy_vfs::GetHeadTree(UINT id)
-{
-	d912pxy_vfs_entry* item = &items[id];
-	return item->m_vfsFileOffsets;
-}
-
-void * d912pxy_vfs::GetCachePointer(UINT32 offset, UINT id)
-{
-	d912pxy_vfs_entry* item = &items[id];
-	offset -= PXY_VFS_BID_TABLE_SIZE + PXY_VFS_BID_TABLE_START;
-	return ((void*)((intptr_t)item->m_vfsCache + offset + 4));
+	return ret;
 }

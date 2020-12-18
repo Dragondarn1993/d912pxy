@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2019 megai2
+Copyright(c) 2019-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -32,16 +32,7 @@ d912pxy_metrics::d912pxy_metrics()
 
 d912pxy_metrics::~d912pxy_metrics()
 {
-#ifdef ENABLE_METRICS
-	FlushIFrameValues();
 
-	for (int i = 0; i != PXY_METRICS_IFRAME_COUNT; ++i)
-		delete iframeTime[i];
-
-	dheapMetrics->Release();
-	iframeMetrics->Release();
-	ohMetrics->Release();
-#endif
 }
 
 void d912pxy_metrics::Init()
@@ -68,8 +59,10 @@ void d912pxy_metrics::Init()
 		dheapMetrics->Create(PXY_METRICS_DHEAP_NAMES[i], 0, 0, d912pxy_dx12_heap_config[i].NumDescriptors, d912pxy_dx12_heap_config[i].NumDescriptors >> 1, 1, &metricDHeapSlots[i]);
 	}
 
-	iframeMetrics->Create(TM("counters / draws"), 0, 0, PXY_INNER_MAX_IFRAME_BATCH_COUNT, PXY_INNER_MAX_IFRAME_BATCH_COUNT / 2, 1, &metricIFrameDraws);
-	iframeMetrics->Create(TM("counters / cleans"), 0, 0, PXY_INNER_MAX_IFRAME_BATCH_COUNT * 3, PXY_INNER_MAX_IFRAME_BATCH_COUNT, 1, &metricIFrameCleans);
+	int batchLimit = d912pxy_s.config.GetValueUI32(PXY_CFG_BATCHING_MAX_BATCHES_PER_IFRAME);
+
+	iframeMetrics->Create(TM("counters / draws"), 0, 0, batchLimit, batchLimit / 2, 1, &metricIFrameDraws);
+	iframeMetrics->Create(TM("counters / cleans"), 0, 0, batchLimit * 3, batchLimit, 1, &metricIFrameCleans);
 	iframeMetrics->Create(TM("mem / pool / surf"), 0, 0, 1ULL << 12, 1ULL << 12, 1, &metricMemSurf);
 	iframeMetrics->Create(TM("mem / pool / ul"), 0, 0, 1ULL << 10, 1ULL << 10, 1, &metricMemUl);
 	iframeMetrics->Create(TM("mem / pool / vstream"), 0, 0, 1ULL << 10, 1ULL << 10, 1, &metricMemVStream);
@@ -101,6 +94,22 @@ void d912pxy_metrics::Init()
 	l_pClient->Release();
 	
 #endif
+}
+
+void d912pxy_metrics::UnInit()
+{
+#ifdef ENABLE_METRICS
+	FlushIFrameValues();
+
+	for (int i = 0; i != PXY_METRICS_IFRAME_COUNT; ++i)
+		delete iframeTime[i];
+
+	dheapMetrics->Release();
+	iframeMetrics->Release();
+	ohMetrics->Release();
+#endif
+
+	d912pxy_noncom::UnInit();
 }
 
 #ifdef ENABLE_METRICS
@@ -150,31 +159,31 @@ void d912pxy_metrics::TrackIFrameTime(UINT start, UINT group)
 
 void d912pxy_metrics::TrackDHeapSlots(UINT idx, UINT slots)
 {
-	dheapMetrics->Add(metricDHeapSlots[idx], slots);
+	dheapMetrics->AddU64(metricDHeapSlots[idx], slots);
 }
 
 void d912pxy_metrics::TrackGPUTime(UINT64 usTime)
 {
-	iframeMetrics->Add(metricGPUTime, usTime);
+	iframeMetrics->AddU64(metricGPUTime, usTime);
 }
 
 void d912pxy_metrics::TrackDrawCount(UINT draws)
 {
-	iframeMetrics->Add(metricIFrameDraws, draws);
+	iframeMetrics->AddU64(metricIFrameDraws, draws);
 	lastDraws = draws;
 }
 
 void d912pxy_metrics::TrackCleanupCount(UINT cleanups)
 {
-	iframeMetrics->Add(metricIFrameCleans, cleanups);
+	iframeMetrics->AddU64(metricIFrameCleans, cleanups);
 }
 
 void d912pxy_metrics::TrackUploadMemUsage()
 {	
-	iframeMetrics->Add(metricMemUlFp[0], d912pxy_s.thread.bufld.GetMemFootprintMB());
-	iframeMetrics->Add(metricMemUlFp[1], d912pxy_s.thread.texld.GetMemFootprintMB());
-	iframeMetrics->Add(metricMemUlFp[2], d912pxy_s.thread.bufld.GetMemFootprintAlignedMB());
-	iframeMetrics->Add(metricMemUlFp[3], d912pxy_s.thread.texld.GetMemFootprintAlignedMB());
+	iframeMetrics->AddU64(metricMemUlFp[0], d912pxy_s.thread.bufld.GetMemFootprintMB());
+	iframeMetrics->AddU64(metricMemUlFp[1], d912pxy_s.thread.texld.GetMemFootprintMB());
+	iframeMetrics->AddU64(metricMemUlFp[2], d912pxy_s.thread.bufld.GetMemFootprintAlignedMB());
+	iframeMetrics->AddU64(metricMemUlFp[3], d912pxy_s.thread.texld.GetMemFootprintAlignedMB());
 }
 
 void d912pxy_metrics::FlushIFrameValues()
@@ -182,9 +191,9 @@ void d912pxy_metrics::FlushIFrameValues()
 	for (int i = 0; i != PXY_METRICS_IFRAME_COUNT; ++i)
 	{
 		if (i == PXY_METRICS_IFRAME_EXEC)
-			iframeMetrics->Add(metricIFrameTimes[i], iframeTime[i]->GetStopTime() - iframeTime[PXY_METRICS_IFRAME_SYNC]->GetStopTime());
+			iframeMetrics->AddU64(metricIFrameTimes[i], iframeTime[i]->GetStopTime() - iframeTime[PXY_METRICS_IFRAME_SYNC]->GetStopTime());
 		else 
-			iframeMetrics->Add(metricIFrameTimes[i], iframeTime[i]->GetStopTime());
+			iframeMetrics->AddU64(metricIFrameTimes[i], iframeTime[i]->GetStopTime());
 	}
 
 
@@ -195,37 +204,37 @@ void d912pxy_metrics::FlushIFrameValues()
 		if (metricOH[i] == 65535)
 			continue;
 
-		ohMetrics->Add(metricOH[i], metricOHval[i]);
+		ohMetrics->AddU64(metricOH[i], metricOHval[i]);
 
 		totalOH += metricOHval[i];
 
 		metricOHval[i] = 0;
 	}
 	
-	iframeMetrics->Add(metricOverhead, totalOH);
-	iframeMetrics->Add(metricIFrameAppPrep, 
+	iframeMetrics->AddU64(metricOverhead, totalOH);
+	iframeMetrics->AddU64(metricIFrameAppPrep,
 		(iframeTime[PXY_METRICS_IFRAME_PREP]->GetStopTime() - totalOH 
 			//megai2: we need to add gpu time and d912pxy sync time to correctly represent % of time spend on api calls in app on frame preparation
 			+ iframeTime[PXY_METRICS_IFRAME_EXEC]->GetStopTime() + iframeTime[PXY_METRICS_IFRAME_SYNC]->GetStopTime() + iframeTime[PXY_METRICS_IFRAME_SYNC_WAKE]->GetStopTime()
 		)*10000 / (iframeTime[PXY_METRICS_IFRAME_PREP]->GetStopTime() + 1));
-	iframeMetrics->Add(metricIFramePerBatchPrep, iframeTime[PXY_METRICS_IFRAME_PREP]->GetStopTime() / (lastDraws + 1));
-	iframeMetrics->Add(metricIFramePerBatchOverhead, totalOH / (lastDraws + 1));
-	iframeMetrics->Add(metricMemHeap, d912pxy_s.mem.GetMemoryUsedMB());
-	iframeMetrics->Add(metricMemVA, d912pxy_s.mem.GetVAMemoryUsedMB());
-	iframeMetrics->Add(metricMemWatched, d912pxy_s.thread.cleanup.TotalWatchedItems());
-	iframeMetrics->Add(metricMemVStream, d912pxy_s.pool.vstream.GetMemoryInPoolMb());
-	iframeMetrics->Add(metricMemSurf, d912pxy_s.pool.surface.GetPoolSizeMB());
-	iframeMetrics->Add(metricMemUl, d912pxy_s.pool.upload.GetMemoryInPoolMb());
+	iframeMetrics->AddU64(metricIFramePerBatchPrep, iframeTime[PXY_METRICS_IFRAME_PREP]->GetStopTime() / (lastDraws + 1));
+	iframeMetrics->AddU64(metricIFramePerBatchOverhead, totalOH / (lastDraws + 1));
+	iframeMetrics->AddU64(metricMemHeap, d912pxy_s.mem.GetMemoryUsedMB());
+	iframeMetrics->AddU64(metricMemVA, d912pxy_s.mem.GetVAMemoryUsedMB());
+	iframeMetrics->AddU64(metricMemWatched, d912pxy_s.thread.cleanup.TotalWatchedItems());
+	iframeMetrics->AddU64(metricMemVStream, d912pxy_s.pool.vstream.GetMemoryInPoolMb());
+	iframeMetrics->AddU64(metricMemSurf, d912pxy_s.pool.surface.GetPoolSizeMB());
+	iframeMetrics->AddU64(metricMemUl, d912pxy_s.pool.upload.GetMemoryInPoolMb());
 
-	iframeMetrics->Add(metricVRAM,		
+	iframeMetrics->AddU64(metricVRAM,
 		d912pxy_s.pool.surface.GetPoolSizeMB() +
-		d912pxy_s.pool.vstream.GetMemoryInPoolMb()
-		+ ((PXY_BATCH_STREAM_SIZE + PXY_BATCH_GPU_BUFFER_SIZE) >> 20)
+		d912pxy_s.pool.vstream.GetMemoryInPoolMb() +
+		(d912pxy_cbuffer::memUsage_V >> 20)		
 	);
 
-	iframeMetrics->Add(metricVRAMShared,
+	iframeMetrics->AddU64(metricVRAMShared,
 		d912pxy_s.pool.upload.GetMemoryInPoolMb() +
-		+ ((PXY_BATCH_STREAM_SIZE) >> 20)
+		(d912pxy_cbuffer::memUsage_UL >> 20)
 	);
 
 	
@@ -233,12 +242,12 @@ void d912pxy_metrics::FlushIFrameValues()
 
 void d912pxy_metrics::TrackGPUWDepth(UINT64 depth)
 {
-	iframeMetrics->Add(metricGPUWDepth, (double)depth);
+	iframeMetrics->AddU64(metricGPUWDepth, depth);
 }
 
 void d912pxy_metrics::TrackReplayItems(UINT64 stackIdx)
 {
-	iframeMetrics->Add(metricReplayItems, (double)stackIdx);
+	iframeMetrics->AddU64(metricReplayItems, stackIdx);
 }
 
 #endif

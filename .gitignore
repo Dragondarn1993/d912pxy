@@ -59,7 +59,6 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
-[Ll]og/
 
 # allow our bin directory
 !bin/
@@ -400,4 +399,7 @@ bin/d912pxy/dx9_perf_graph.png
 bin/d912pxy/dx9_perf_graph.html
 bin/d912pxy/installed.flag
 bin/d912pxy_installer_backup._ll
-*.pck
+bin/d912pxy/log.1.txt
+bin/imgui.ini
+bin/d912pxy/imgui.ini
+compiler_output/*

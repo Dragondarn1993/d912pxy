@@ -50,6 +50,7 @@ public:
 	~d912pxy_log();
 
 	void Init();
+	void UnInit();
 
 #ifndef DISABLE_P7LIB
 	IP7_Trace* GetP7Trace();
@@ -78,7 +79,7 @@ private:
 	d912pxy_thread_lock logLock;
 #endif
 
-	FILE* crashLog;
+	FILE* crashLog=nullptr;
 	UINT32 crashLogLine;
 	d912pxy_thread_lock crashLock;
 };

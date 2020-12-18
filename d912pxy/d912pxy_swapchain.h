@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -95,6 +95,8 @@ public:
 	HRESULT Swap();
 	HRESULT SwapCheck();
 
+	void WaitForNewFrame();
+
 	d912pxy_swapchain_state GetCurrentState() { return state; };
 
 	void CopyFrameToDXGI(ID3D12GraphicsCommandList* cl);
@@ -103,8 +105,12 @@ public:
 	void GetGammaRamp(D3DGAMMARAMP* pRamp);
 
 	LRESULT DXGIWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+	LRESULT DXGIWndProc_Extras(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	void ReanimateDXGI();
+
+	HWND GetTargetWindow();
+	d912pxy_surface* GetRenderBuffer();
 
 private:	
 	d912pxy_swapchain(int index, D3DPRESENT_PARAMETERS* in_pp);
@@ -155,6 +161,8 @@ private:
 	DXGI_FORMAT GetDXGIFormatForBackBuffer(D3DFORMAT fmt);
 	UINT DXGIFullscreenInterrupt(UINT inactive);
 	void CacheDXGITearingSupport();
+
+	void OverrideWndProc();
 	
 	ComPtr<IDXGISwapChain4> dxgiSwapchain;
 	ComPtr<ID3D12Resource> dxgiBackBuffer[4];	
@@ -163,6 +171,8 @@ private:
 	UINT dxgiPresentFlags;
 	UINT dxgiTearingSupported;
 	UINT dxgiBuffersCount;
+	UINT dxgiMaxFrameLatency;
+	HANDLE dxgiFrameLatencyWaitObj;
 
 	d912pxy_thread_lock fullscreenIterrupt;
 	WNDPROC dxgiOWndProc;

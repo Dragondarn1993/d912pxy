@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright(c) 2018-2019 megai2
+Copyright(c) 2018-2020 megai2
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files(the "Software"), to deal
@@ -28,8 +28,9 @@ UINT d912pxy_resource::residencyOverride = 0;
 
 d912pxy_resource::d912pxy_resource(d912pxy_resource_typeid type, d912pxy_com_obj_typeid tid, const wchar_t * cat) : d912pxy_comhandler(tid, cat)
 {
-	m_tid = type;	
+	m_tid = type;
 	evicted = residencyOverride;
+	stateCache = D3D12_RESOURCE_STATE_COMMON;
 	m_res = NULL;
 }
 
@@ -96,19 +97,15 @@ ID3D12Resource* d912pxy_resource::d12res_tex2d_target(UINT width, UINT height, D
 	if (*levels != 0)
 		ret = d912pxy_s.pool.surface.GetPlacedSurface(&rsDesc, D3D12_RESOURCE_STATE_COMMON);
 
-	HRESULT hr = -1;
-
-	if (!ret)
-		hr = d912pxy_s.dx12.dev->CreateCommittedResource(
-			&rhCfg,
-			D3D12_HEAP_FLAG_NONE,
-			&rsDesc,
-			D3D12_RESOURCE_STATE_COMMON,
-			NULL,
-			IID_PPV_ARGS(&ret)
-		);
-	else
-		hr = S_OK;
+	HRESULT hr = !ret
+		? d912pxy_s.dx12.dev->CreateCommittedResource(
+				&rhCfg,
+				D3D12_HEAP_FLAG_NONE,
+				&rsDesc,
+				D3D12_RESOURCE_STATE_COMMON,
+				NULL,
+				IID_PPV_ARGS(&ret))
+		: S_OK;
 
 	if (hr != S_OK)
 	{
@@ -367,13 +364,7 @@ void d912pxy_resource::BCopyToWStates(d912pxy_resource * dst, UINT barriers, ID3
 		dst->BTransit(D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, dstStateCache, D3D12_RESOURCE_STATE_COPY_DEST, cl);
 }
 
-intptr_t d912pxy_resource::GetVA_GPU()
+UINT64 d912pxy_resource::GetVA_GPU()
 {
 	return m_res->GetGPUVirtualAddress();
-}
-
-void d912pxy_resource::GetCopyableFootprints(UINT subres, D3D12_PLACED_SUBRESOURCE_FOOTPRINT* ret)
-{	
-	d912pxy_s.dx12.dev->GetCopyableFootprints(&m_res->GetDesc(), subres, 1, 0, ret, 0, 0, 0);
-	LOG_DBG_DTDM("pfo %llu pfW %u pfH %u pdD %u", ret->Offset, ret->Footprint.Width, ret->Footprint.Height, ret->Footprint.Depth);
 }

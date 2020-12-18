@@ -44,7 +44,7 @@ public:
 	void Signal();	
 	void EnqueueCleanup(d912pxy_comhandler* obj);
 
-	void CleanupAllReferenced();
+	void FinalReferenceCleanup();
 	void CleanupReferenced(UINT items);
 
 	void EnableGID(d912pxy_gpu_cmd_list_group id, UINT32 prio);
@@ -52,7 +52,7 @@ public:
 	ID3D12GraphicsCommandList* GID(d912pxy_gpu_cmd_list_group id) { return mCL[id].cl; }
 
 private:	
-	d912pxy_gpu_cmd_list_entry mActCL[PXY_INNER_MAX_GPU_CMD_LIST_GROUPS];
+	d912pxy_gpu_cmd_list_entry mActCL[PXY_INNER_MAX_GPU_CMD_LIST_GROUPS] = {};
 	d912pxy_gpu_cmd_list_entry mCL[PXY_INNER_MAX_GPU_CMD_LIST_GROUPS];
 	UINT32 mCLPrio[PXY_INNER_MAX_GPU_CMD_LIST_GROUPS];
 	UINT32 totalActCLs;
